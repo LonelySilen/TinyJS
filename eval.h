@@ -32,13 +32,8 @@ namespace Eval
 
         void action(std::unique_ptr<ExprAST> expr)
         {
-            switch (expr->get_type())
-            {
-                case Type::value_expr:
-                    eval_value_expr(std::move(expr));
-                default:
-                    break;
-            }
+            // if (expr->get_type() == Type::binary_op_expr)
+            //     action()
         }
 
         void eval_value_expr(std::unique_ptr<ExprAST> expr)

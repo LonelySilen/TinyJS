@@ -13,8 +13,13 @@ namespace Env
         std::unordered_map<std::string, T> Symbol;
 
     public:
-        EnvImpl() { Symbol.clear(); }
+        EnvImpl() { reset(); }
         virtual ~EnvImpl() = default;
+
+        T&& get(const std::string& key) { return Symbol.find(key) != Symbol.end() ? Symbol[key] : nullptr; }
+
+        void set(const std::string& key, T&& value) { Symbol[key] = value; }
+        void reset() { Symbol.clear(); }
     };
 }
 

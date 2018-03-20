@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#define LOG
+// #define LOG
 
 namespace Parser
 {
