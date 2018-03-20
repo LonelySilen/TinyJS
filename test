@@ -1,0 +1,22 @@
+// a=1+2*3;
+// b=a;
+c=d+(2+23)
+
+d = "\'asdwb\'"
+
+function a(p1,p2, p3)
+{
+    b=c+d;
+    f=g+h;
+    e=b=1;
+}
+
+
+function b()
+{}
+
+a_aa=a+1;
+
+
+a=1==2;
+b!=8;
