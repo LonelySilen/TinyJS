@@ -1,5 +1,3 @@
-#include "lex.h"
-#include "ast.h"
 #include "parser.h"
 #include "eval.h"
 #include <string>
@@ -27,7 +25,8 @@ void test_parser()
     Parser::ParserImpl t(fin.rdbuf());
     // Parser::ParserImpl t;
     // t.parser();
-    Eval::EvalImpl<decltype(t.parser())&&> e(t.parser());
+    Eval::EvalImpl<decltype(t.parser())> e(t.parser());
+    e.eval();
 }
 
 int main()

@@ -4,7 +4,7 @@ using namespace Parser;
 // expression
 //   ::= primary binoprhs
 //
-std::unique_ptr<ExprAST> ParserImpl::parser_experssion()
+std::shared_ptr<ExprAST> ParserImpl::parser_experssion()
 {
 #ifdef LOG
     log("in parser_experssion");
@@ -12,14 +12,14 @@ std::unique_ptr<ExprAST> ParserImpl::parser_experssion()
     auto LHS = parser_primary();
     if (!LHS)
         return nullptr;
-    return parser_binaryOpExpr(0, std::move(LHS));
+    return parser_binaryOpExpr(0, LHS);
 }
 
 // primary
 //   ::= identifierexpr
 //   ::= parenexpr
 //   ::= numberexpr
-std::unique_ptr<ExprAST> ParserImpl::parser_primary()
+std::shared_ptr<ExprAST> ParserImpl::parser_primary()
 {
 #ifdef LOG
     log("in parser_primary");
@@ -42,7 +42,7 @@ std::unique_ptr<ExprAST> ParserImpl::parser_primary()
 
 // binoprhs
 //   ::= ('+' primary)*
-std::unique_ptr<ExprAST> ParserImpl::parser_binaryOpExpr(int expr_prec, std::unique_ptr<ExprAST> LHS)
+std::shared_ptr<ExprAST> ParserImpl::parser_binaryOpExpr(int expr_prec, std::shared_ptr<ExprAST> LHS)
 {
 #ifdef LOG
     log("in parser_binaryOpExpr");
@@ -64,15 +64,19 @@ std::unique_ptr<ExprAST> ParserImpl::parser_binaryOpExpr(int expr_prec, std::uni
         int next_prec = get_tok_prec(CurToken.tk_string);
         if (tok_prec < next_prec)
         {
-            RHS = parser_binaryOpExpr(tok_prec + 1, std::move(RHS));
+            RHS = parser_binaryOpExpr(tok_prec + 1, RHS);
             if (!RHS)
                 return nullptr;
         }
-        LHS = std::make_unique<BinaryOpExprAST>(bin_op, std::move(LHS), std::move(RHS));
+        LHS = std::make_shared<BinaryOpExprAST>(bin_op, LHS, RHS);
     }
 }
 
-std::unique_ptr<ExprAST> ParserImpl::parser_value()
+// value_expr
+//  ::= double
+//  ::= long long
+//  ::= string
+std::shared_ptr<ExprAST> ParserImpl::parser_value()
 {
 #ifdef LOG
     log("in parser_value");
@@ -102,13 +106,13 @@ std::unique_ptr<ExprAST> ParserImpl::parser_value()
 
     get_next_token(); // eat Number
     if (is_v1)
-        return std::make_unique<ValueExprAST<decltype(v1)>>(std::move(v1));
+        return std::make_shared<IntegerValueExprAST>(v1);
 
     if (is_v2)
-        return std::make_unique<ValueExprAST<decltype(v2)>>(std::move(v2));
+        return std::make_shared<FloatValueExprAST>(v2);
     
     if (is_v3)
-        return std::make_unique<ValueExprAST<decltype(v3)>>(std::move(v3));
+        return std::make_shared<StringValueExprAST>(v3);
 
     return nullptr;
 }
@@ -116,7 +120,7 @@ std::unique_ptr<ExprAST> ParserImpl::parser_value()
 // identifierexpr
 //   ::= identifier
 //   ::= identifier '(' expression* ')'
-std::unique_ptr<ExprAST> ParserImpl::parser_identifier()
+std::shared_ptr<ExprAST> ParserImpl::parser_identifier()
 {
 #ifdef LOG
     log("in parser_identifier");
@@ -124,16 +128,16 @@ std::unique_ptr<ExprAST> ParserImpl::parser_identifier()
     std::string IdName = CurToken.tk_string;
     get_next_token();
     if (CurToken.tk_string != "(")
-        return std::make_unique<VariableExprAST>(IdName);
+        return std::make_shared<VariableExprAST>(IdName);
 
     get_next_token(); // eat '('
-    std::vector<std::unique_ptr<ExprAST>> Args;
+    std::vector<std::shared_ptr<ExprAST>> Args;
     if (CurToken.tk_string != ")")
     {
         while (true)
         {
             if (auto Arg = parser_experssion())
-                Args.push_back(std::move(Arg));
+                Args.push_back(Arg);
             else
                 parser_log_err("[parser_identifier] Parser Arg Err.");
 
@@ -146,11 +150,11 @@ std::unique_ptr<ExprAST> ParserImpl::parser_identifier()
         }
     }
     get_next_token(); // eat ')'
-    return std::make_unique<CallExprAST>(IdName, std::move(Args));
+    return std::make_shared<CallExprAST>(IdName, Args);
 }
 
 // parenexpr ::= '(' expression ')'
-std::unique_ptr<ExprAST> ParserImpl::parser_parenExpr()
+std::shared_ptr<ExprAST> ParserImpl::parser_parenExpr()
 {
 #ifdef LOG
     log("in parser_parenExpr");
@@ -168,8 +172,8 @@ std::unique_ptr<ExprAST> ParserImpl::parser_parenExpr()
     return V;
 }
 
-// PrototypeExpr ::= 'function' identifier '(' expression ')'
-std::unique_ptr<PrototypeAST> ParserImpl::parser_prototype()
+// PrototypeExpr ::= 'function' identifier? '(' expression ')'
+std::shared_ptr<PrototypeAST> ParserImpl::parser_prototype()
 {
 #ifdef LOG
     log("in parser_prototype");
@@ -208,11 +212,11 @@ std::unique_ptr<PrototypeAST> ParserImpl::parser_prototype()
         }
     }
     get_next_token(); // eat ')'
-    return std::make_unique<PrototypeAST>(FnName, std::move(Args));
+    return std::make_shared<PrototypeAST>(FnName, Args);
 }
 
 // functionexpr = 'function' identifier parenexpr
-std::unique_ptr<FunctionAST> ParserImpl::parser_function()
+std::shared_ptr<FunctionAST> ParserImpl::parser_function()
 {
 #ifdef LOG
     log("in parser_function");
@@ -226,14 +230,14 @@ std::unique_ptr<FunctionAST> ParserImpl::parser_function()
         parser_log_err("[parser_function] Expected an '{'.");
     get_next_token(); // eat '{'
 
-    std::vector<std::unique_ptr<ExprAST>> Body;
+    std::vector<std::shared_ptr<ExprAST>> Body;
     if (CurToken.tk_string != "}")
     {
         while (true)
         {
             if (auto E = parser_line())
             {
-                Body.push_back(std::move(E));
+                Body.push_back(E);
                 if (CurToken.tk_string != ";")
                     parser_log_err("[parser_function] Expected an ';'.");
                 get_next_token(); // eat ';'
@@ -243,7 +247,6 @@ std::unique_ptr<FunctionAST> ParserImpl::parser_function()
                 break;
         }
     }
-
     get_next_token(); // eat '}'
-    return std::make_unique<FunctionAST>(std::move(Proto), std::move(Body));
+    return std::make_shared<FunctionAST>(Proto, Body);
 }

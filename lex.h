@@ -90,6 +90,14 @@ namespace Lexer
         LexerImpl(LexerImpl&&) = delete;
         const LexerImpl& operator =(LexerImpl&&) = delete;
 
+        void lexer_reset() 
+        {
+            CurStr = "";
+            LastChar = ' ';
+            CurToken = Token();
+            LineNumber = 1;
+        }
+
         void set_input(std::streambuf* sptr)
         {
             StreamBackup = nullptr;
@@ -170,7 +178,7 @@ namespace Lexer
             {
                 while (cin.peek() != '\n' && cin.peek() != '\r')
                     cin.get();
-                LastChar = cin.get(); // pre-read a char
+                LastChar = cin.peek(); // pre-read a char
                 return get_next_token();
             }
 
@@ -242,7 +250,7 @@ namespace Lexer
         {
             cout << "Token {" << endl << "  tk_type: " << TokenName[t.tk_type] << endl;
             cout << "  tk_string: " << t.tk_string << endl;
-            cout << " " << int(t.tk_string[0]) << endl;
+            // cout << " " << int(t.tk_string[0]) << endl;
             cout << "}" << endl;
         }
     };

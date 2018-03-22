@@ -4,12 +4,18 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <map>
+#include <iostream>
 
 namespace AST
 {
     enum class Type
     {
-        value_expr,
+        /* value_expr */
+        integer_expr,
+        float_expr,
+        string_expr,
+        /* syntax */
         variable_expr,
         binary_op_expr,
         call_expr,
@@ -17,108 +23,108 @@ namespace AST
         function_expr,
     };
 
-    class ExprAST
-    {
-        private:
-            Type Sub_Type;
-
-        public:
-            ExprAST() = delete;
-            ExprAST(Type Sub_Type) : Sub_Type(Sub_Type) { }
-            virtual ~ExprAST() = default;
-
-            Type get_type() { return Sub_Type; }
+    static std::map<Type, std::string> ASTName {
+        { Type::integer_expr   , "integer_expr"   },
+        { Type::float_expr     , "float_expr"     },
+        { Type::string_expr    , "string_expr"    },
+        { Type::variable_expr  , "variable_expr"  },
+        { Type::binary_op_expr , "binary_op_expr" },
+        { Type::call_expr      , "call_expr"      },
+        { Type::prototype_expr , "prototype_expr" },
+        { Type::function_expr  , "function_expr"  },
     };
 
-    template <typename T>
-    class ValueExprAST : public ExprAST
+    class ExprAST
     {
-        private:
-            T Val;
-
         public:
-            ValueExprAST(const T Val) : ExprAST(Type::value_expr), Val(Val) { }
-            
-            auto get_value() -> decltype(Val) { return Val; }
+            Type SubType;
+
+            ExprAST() = delete;
+            ExprAST(Type SubType) : SubType(SubType) { }
+            virtual ~ExprAST() = default;
+
+            void print_ast() 
+            {
+                std::cout << "ASTName {" << std::endl;
+                std::cout << "  " << ASTName[SubType] << std::endl;
+                std::cout << "}" << std::endl;
+            }
+    };
+
+    class IntegerValueExprAST : public ExprAST
+    {
+        public:
+            long long Val;
+            IntegerValueExprAST(long long Val) : ExprAST(Type::integer_expr), Val(Val) {}
+        
+    };
+
+    class FloatValueExprAST : public ExprAST
+    {
+        public:
+            double Val;
+            FloatValueExprAST(double Val) : ExprAST(Type::float_expr), Val(Val) { }
+        
+    };
+
+    class StringValueExprAST : public ExprAST
+    {
+        public:
+            std::string Val;
+            StringValueExprAST(const std::string& Val) :  ExprAST(Type::string_expr), Val(Val) { }
+        
     };
 
     class VariableExprAST : public ExprAST
     {
-        private:
-            std::string Name;
-
         public:
+            std::string Name;
             VariableExprAST(const std::string& Name) : ExprAST(Type::variable_expr), Name(Name) { }
             
-            std::string get_value() { return Name; }
     };
 
     class BinaryOpExprAST : public ExprAST
     {
-        private:
-            std::string Op;
-            std::unique_ptr<ExprAST> LHS, RHS;
-            std::shared_ptr<decltype(std::make_pair(LHS, RHS))> LR_Ptr; /* ret value */
-        
         public:
-            BinaryOpExprAST(const std::string& Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
+            std::string Op;
+            std::shared_ptr<ExprAST> LHS, RHS;
+            BinaryOpExprAST(const std::string& Op, std::shared_ptr<ExprAST> LHS, std::shared_ptr<ExprAST> RHS)
                 : ExprAST(Type::binary_op_expr), 
-                Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)),
-                LR_Ptr(std::make_shared<decltype(std::make_pair(LHS, RHS))>(std::make_pair(std::move(LHS), std::move(RHS)))) { }
+                Op(Op), LHS(LHS), RHS(RHS) { }
 
-            // pair => (Op, (LHS, RHS))
-            auto get_value() -> decltype(std::make_pair(Op, LR_Ptr)) { return std::make_pair(Op, LR_Ptr); }
     };
 
     class CallExprAST : public ExprAST
     {
-        private:
-            std::string Callee;
-            std::vector<std::unique_ptr<ExprAST>> Args;
-            std::shared_ptr<decltype(Args)> Args_Ptr; /* ret value */
-
         public:
-            CallExprAST(const std::string& Callee, std::vector<std::unique_ptr<ExprAST>> Args) : 
+            std::string Callee;
+            std::vector<std::shared_ptr<ExprAST>> Args;
+            CallExprAST(const std::string& tCallee, std::vector<std::shared_ptr<ExprAST>> tArgs) : 
                 ExprAST(Type::call_expr), 
-                Callee(Callee), Args(std::move(Args)), 
-                Args_Ptr(std::make_shared<decltype(Args)>(std::move(Args))) { }
-
-            // pair => (Callee, Args)
-            auto get_value() -> decltype(std::make_pair(Callee, Args_Ptr)) { return std::make_pair(Callee, Args_Ptr); }
+                Callee(tCallee), Args(tArgs) { }
 
     };
 
     class PrototypeAST : public ExprAST
     {
-        private:
+        public:
             std::string Name;
             std::vector<std::string> Args;
-            std::shared_ptr<decltype(Args)> Args_Ptr; /* ret value */
-
-        public:
-            PrototypeAST(const std::string& Name, std::vector<std::string> Args) : ExprAST(Type::prototype_expr), Name(Name), Args(Args), 
-                Args_Ptr(std::make_shared<decltype(Args)>(std::move(Args))) { }
-
-            // pair => (Name, Args)
-            auto get_value() -> decltype(std::make_pair(Name, Args_Ptr)) { return std::make_pair(Name, Args_Ptr); }
+            PrototypeAST(const std::string& tName, std::vector<std::string> tArgs) : ExprAST(Type::prototype_expr), Name(tName), Args(tArgs) { }
     };
 
     class FunctionAST : public ExprAST
     {
-        private:
-            std::unique_ptr<PrototypeAST> Proto;
-            std::vector<std::unique_ptr<ExprAST>> Body;
-            std::shared_ptr<decltype(Body)> Body_Ptr; /* ret value */
-
         public:
-            FunctionAST(std::unique_ptr<PrototypeAST> Proto, std::vector<std::unique_ptr<ExprAST>> Body) : 
+            std::shared_ptr<PrototypeAST> Proto;
+            std::vector<std::shared_ptr<ExprAST>> Body;
+            FunctionAST(std::shared_ptr<PrototypeAST> tProto, std::vector<std::shared_ptr<ExprAST>> tBody) : 
                 ExprAST(Type::function_expr), 
-                Proto(std::move(Proto)), Body(std::move(Body)),
-                Body_Ptr(std::make_shared<decltype(Body)>(std::move(Body))) { }
+                Proto(tProto), Body(tBody) { }
 
-            // pair => (Proto, Body)
-            auto get_value() -> decltype(std::make_pair(Proto, Body_Ptr)) { return std::make_pair(std::move(Proto), Body_Ptr); }
+            int test() { return 1; }
     };
+
 }
 
 #endif
