@@ -44,6 +44,7 @@ namespace Parser
         std::shared_ptr<ExprAST> parser_parenExpr();
         std::shared_ptr<FunctionAST> parser_function();
         std::shared_ptr<PrototypeAST> parser_prototype();
+        std::shared_ptr<ExprAST> parser_return();
 
         void parser_init()
         {
@@ -60,6 +61,7 @@ namespace Parser
                 BinOpPrecedence["-"] = 20;
                 BinOpPrecedence["*"] = 30;
                 BinOpPrecedence["/"] = 30;
+                BinOpPrecedence["%"] = 30;
             }
             ParserResult.clear();
         }
@@ -75,7 +77,7 @@ namespace Parser
             get_next_token();
             while (!cin.eof())
             {
-                cout << "ready> ";
+                // cout << "ready> ";
                 if (CurToken.tk_string == ";") // Skip end of line ';' if exist
                     get_next_token();
                 if (CurToken.tk_type == Lexer::Type::tok_eof) // End of file
@@ -97,6 +99,8 @@ namespace Parser
                     return parser_experssion();
                 case Lexer::Type::tok_function:
                     return parser_function();
+                case Lexer::Type::tok_return:
+                    return parser_return();
                 case Lexer::Type::tok_eof:
                     break;
                 default:

@@ -21,6 +21,7 @@ namespace AST
         call_expr,
         prototype_expr,
         function_expr,
+        return_expr,
     };
 
     static std::map<Type, std::string> ASTName {
@@ -32,6 +33,7 @@ namespace AST
         { Type::call_expr      , "call_expr"      },
         { Type::prototype_expr , "prototype_expr" },
         { Type::function_expr  , "function_expr"  },
+        { Type::return_expr    , "return_expr"    },
     };
 
     class ExprAST
@@ -88,9 +90,7 @@ namespace AST
         public:
             std::string Op;
             std::shared_ptr<ExprAST> LHS, RHS;
-            BinaryOpExprAST(const std::string& Op, std::shared_ptr<ExprAST> LHS, std::shared_ptr<ExprAST> RHS)
-                : ExprAST(Type::binary_op_expr), 
-                Op(Op), LHS(LHS), RHS(RHS) { }
+            BinaryOpExprAST(const std::string& Op, std::shared_ptr<ExprAST> LHS, std::shared_ptr<ExprAST> RHS) : ExprAST(Type::binary_op_expr), Op(Op), LHS(LHS), RHS(RHS) { }
 
     };
 
@@ -99,9 +99,7 @@ namespace AST
         public:
             std::string Callee;
             std::vector<std::shared_ptr<ExprAST>> Args;
-            CallExprAST(const std::string& tCallee, std::vector<std::shared_ptr<ExprAST>> tArgs) : 
-                ExprAST(Type::call_expr), 
-                Callee(tCallee), Args(tArgs) { }
+            CallExprAST(const std::string& Callee, std::vector<std::shared_ptr<ExprAST>> Args) : ExprAST(Type::call_expr), Callee(Callee), Args(Args) { }
 
     };
 
@@ -110,7 +108,7 @@ namespace AST
         public:
             std::string Name;
             std::vector<std::string> Args;
-            PrototypeAST(const std::string& tName, std::vector<std::string> tArgs) : ExprAST(Type::prototype_expr), Name(tName), Args(tArgs) { }
+            PrototypeAST(const std::string& Name, std::vector<std::string> Args) : ExprAST(Type::prototype_expr), Name(Name), Args(Args) { }
     };
 
     class FunctionAST : public ExprAST
@@ -118,11 +116,17 @@ namespace AST
         public:
             std::shared_ptr<PrototypeAST> Proto;
             std::vector<std::shared_ptr<ExprAST>> Body;
-            FunctionAST(std::shared_ptr<PrototypeAST> tProto, std::vector<std::shared_ptr<ExprAST>> tBody) : 
-                ExprAST(Type::function_expr), 
-                Proto(tProto), Body(tBody) { }
+            FunctionAST(std::shared_ptr<PrototypeAST> Proto, std::vector<std::shared_ptr<ExprAST>> Body) : ExprAST(Type::function_expr), Proto(Proto), Body(Body) { }
 
-            int test() { return 1; }
+    };
+
+    class ReturnExprAST : public ExprAST
+    {
+        public:
+            std::shared_ptr<ExprAST> RetValue;
+            ReturnExprAST() : ExprAST(Type::return_expr), RetValue(nullptr) { }
+            ReturnExprAST(std::shared_ptr<ExprAST> RetValue) : ExprAST(Type::return_expr), RetValue(RetValue) { }
+        
     };
 
 }

@@ -250,3 +250,16 @@ std::shared_ptr<FunctionAST> ParserImpl::parser_function()
     get_next_token(); // eat '}'
     return std::make_shared<FunctionAST>(Proto, Body);
 }
+
+std::shared_ptr<ExprAST> ParserImpl::parser_return()
+{
+#ifdef LOG
+    log("in parser_return");
+#endif
+    get_next_token(); // eat 'return'
+    if (CurToken.tk_string == ";") // just return
+        return std::make_shared<ReturnExprAST>();
+
+    auto E = parser_experssion();
+    return std::make_shared<ReturnExprAST>(E);
+}

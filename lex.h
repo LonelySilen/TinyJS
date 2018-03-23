@@ -32,6 +32,8 @@ namespace Lexer
         tok_single_char, // single char op
         // >, <, ==, >=, <=, !=
         tok_op_cmp,
+        // return
+        tok_return,
 
         // if-else for while
     };
@@ -48,6 +50,7 @@ namespace Lexer
         { Type::tok_string        , "tok_string"        },
         { Type::tok_single_char   , "tok_single_char"   },
         { Type::tok_op_cmp        , "tok_op_cmp"        },
+        { Type::tok_return        , "tok_return"        },
     };
 
     class Token
@@ -130,6 +133,8 @@ namespace Lexer
                 while (isalnum((LastChar = cin.get())) || LastChar == '_')
                     CurStr += LastChar;
 
+                if (CurStr == "return")
+                    return CurToken = Token(Type::tok_return, CurStr);
                 if (CurStr == "function")
                     return CurToken = Token(Type::tok_function, CurStr);
                 return CurToken = Token(Type::tok_identifier, CurStr);
