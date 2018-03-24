@@ -23,11 +23,13 @@ namespace Eval
         std::shared_ptr<EnvImpl> CurScope;
         const std::string TopScope = "__top_expression";
         T Expression; // T := vector<unique_ptr<ExprAST>>
+        long long LineNumber;
 
     public:
         EvalImpl() = delete;
         EvalImpl(T Expression) : Expression(std::move(Expression)) 
         {
+            LineNumber = 1;
             if (!Scope)
             {
                 CurScope.reset(new EnvImpl(TopScope));
@@ -40,6 +42,14 @@ namespace Eval
         const EvalImpl& operator =(const EvalImpl&) = delete;
         EvalImpl(EvalImpl&&) = delete;
         const EvalImpl& operator =(EvalImpl&&) = delete;
+
+        std::shared_ptr<EnvImpl> get_top_scope()
+        {
+            auto _CurScope = CurScope;
+            while (_CurScope->Parent)
+                _CurScope = _CurScope->Parent;
+            return _CurScope;
+        }
 
         void enter_new_env()
         {
@@ -111,7 +121,10 @@ namespace Eval
         void eval()
         {
             for (auto& i : Expression)
+            {
                 eval_one(i);
+                LineNumber++;
+            }
 
             print_value("a");
             print_value("d");
@@ -127,7 +140,11 @@ namespace Eval
                 case Type::variable_expr:
                     return expr;
                 case Type::function_expr:
-                    return eval_function_expr(std::static_pointer_cast<FunctionAST>(expr));
+                {
+                    auto func = std::static_pointer_cast<FunctionAST>(expr);
+                    LineNumber += func->Body.size();
+                    return eval_function_expr(func);
+                }
                 case Type::binary_op_expr:
                     return eval_binary_op_expr(std::static_pointer_cast<BinaryOpExprAST>(expr));
                 case Type::call_expr:
@@ -149,16 +166,16 @@ namespace Eval
         std::shared_ptr<ExprAST> eval_call_expr(std::shared_ptr<CallExprAST> Caller)
         {
             // Switch to sub scope
-            auto C = find_name(Caller->Callee);
-            if (!C)
+            CurScope = find_name_belong_scope(Caller->Callee);
+            auto F = CurScope->get(Caller->Callee);
+            if (!F)
             {
-                std::string err_info = "[eval_call_expr] Undefined symbol '" + Caller->Callee + "'.";
+                std::string err_info = "[eval_call_expr] ReferenceError: '" + Caller->Callee + "' is not defined. ";
                 eval_err(err_info);
             }
-            CurScope = find_name_belong_scope(Caller->Callee);
 
             // Get the function definition
-            auto Func = std::static_pointer_cast<FunctionAST>(CurScope->get(Caller->Callee));
+            auto Func = std::static_pointer_cast<FunctionAST>(F);
             // Match the parameters list
             if (Caller->Args.size() != Func->Proto->Args.size())
             {
@@ -236,6 +253,9 @@ namespace Eval
                     break;
             }
 
+            // null => 0
+            if (!LHS) LHS = std::make_shared<IntegerValueExprAST>(0);
+            if (!RHS) RHS = std::make_shared<IntegerValueExprAST>(0);
             return eval_bin_op_expr_helper(expr->Op, LHS, RHS);
         }
 
@@ -244,12 +264,17 @@ namespace Eval
             if (Op == "=")
             {
                 if (LHS->SubType != Type::variable_expr)
-                    eval_err("[eval_bin_op_expr_helper] Expected a variable_expr before '=', rvalue is not a identifier");
+                    eval_err("[eval_bin_op_expr_helper] Expected a variable_expr before '=', rvalue is not a identifier. ");
 
                 // Invoke assign(...) if need check type
                 // assign(LHS, RHS);
                 auto _var = std::static_pointer_cast<VariableExprAST>(LHS);
-                set_name(_var->Name, RHS);
+                if (_var->DefineType == "var")
+                    get_top_scope()->set(_var->Name, RHS);
+                else if (_var->DefineType == "let")
+                    CurScope->set(_var->Name, RHS);
+                else
+                    set_name(_var->Name, RHS);
                 return RHS;
             }
             /* It's a variable */
@@ -260,7 +285,7 @@ namespace Eval
                 
                 if (!LHS)
                 {
-                    std::string err_info = "[eval_bin_op_expr_helper] Undefined symbol '" + _l->Name + "'.";
+                    std::string err_info = "[eval_bin_op_expr_helper] ReferenceError: '" + _l->Name + "' is not defined. ";
                     eval_err(err_info);
                 }
             }
@@ -271,7 +296,7 @@ namespace Eval
                 RHS = find_name(_r->Name);
                 if (!RHS)
                 {
-                    std::string err_info = "[eval_bin_op_expr_helper] Undefined symbol '" + _r->Name + "'.";
+                    std::string err_info = "[eval_bin_op_expr_helper] ReferenceError: '" + _r->Name + "' is not defined. ";
                     eval_err(err_info);
                 }
             }
@@ -283,7 +308,7 @@ namespace Eval
             if (Op == "/") return div(LHS, RHS);
             if (Op == "%") return mod(LHS, RHS);
             
-            log_err("[eval_bin_op_expr_helper] Invalid parameters.");
+            eval_err("[eval_bin_op_expr_helper] Invalid parameters.");
             return nullptr;
         }
 
@@ -323,6 +348,7 @@ namespace Eval
             if (LHS->SubType == Type::string_expr && RHS->SubType == Type::float_expr)
                 return std::make_shared<StringValueExprAST>(std::static_pointer_cast<StringValueExprAST>(LHS)->Val + std::to_string(std::static_pointer_cast<FloatValueExprAST>(RHS)->Val));
 
+            LHS->print_ast(); RHS->print_ast();
             eval_err("[add] Invalid '+' expression.");
             return nullptr;
         }
@@ -342,6 +368,7 @@ namespace Eval
             if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
                 return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val - std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
 
+            LHS->print_ast(); RHS->print_ast();
             eval_err("[sub] Invalid '-' expression.");
             return nullptr;
         }
@@ -361,6 +388,7 @@ namespace Eval
             if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
                 return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val * std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
 
+            LHS->print_ast(); RHS->print_ast();
             eval_err("[mul] Invalid '*' expression.");
             return nullptr;
         }
@@ -380,6 +408,7 @@ namespace Eval
             if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
                 return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val / std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
 
+            LHS->print_ast(); RHS->print_ast();
             eval_err("[div] Invalid '/' expression.");
             return nullptr;
         }
@@ -399,12 +428,14 @@ namespace Eval
             if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
                 return std::make_shared<FloatValueExprAST>(fmod(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val, std::static_pointer_cast<FloatValueExprAST>(RHS)->Val));
 
+            LHS->print_ast(); RHS->print_ast();
             eval_err("[mod] Invalid '%' expression.");
             return nullptr;
         }
 
         void eval_err(const std::string& loginfo)
         {
+            std::cerr << "[Error] in line: " << LineNumber << std::endl;
             std::cerr << loginfo << std::endl;
             exit(1);
         }

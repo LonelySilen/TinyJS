@@ -25,15 +25,15 @@ namespace AST
     };
 
     static std::map<Type, std::string> ASTName {
-        { Type::integer_expr   , "integer_expr"   },
-        { Type::float_expr     , "float_expr"     },
-        { Type::string_expr    , "string_expr"    },
-        { Type::variable_expr  , "variable_expr"  },
-        { Type::binary_op_expr , "binary_op_expr" },
-        { Type::call_expr      , "call_expr"      },
-        { Type::prototype_expr , "prototype_expr" },
-        { Type::function_expr  , "function_expr"  },
-        { Type::return_expr    , "return_expr"    },
+        { Type::integer_expr         , "integer_expr"         },
+        { Type::float_expr           , "float_expr"           },
+        { Type::string_expr          , "string_expr"          },
+        { Type::variable_expr        , "variable_expr"        },
+        { Type::binary_op_expr       , "binary_op_expr"       },
+        { Type::call_expr            , "call_expr"            },
+        { Type::prototype_expr       , "prototype_expr"       },
+        { Type::function_expr        , "function_expr"        },
+        { Type::return_expr          , "return_expr"          },
     };
 
     class ExprAST
@@ -80,8 +80,10 @@ namespace AST
     class VariableExprAST : public ExprAST
     {
         public:
+            std::string DefineType;
             std::string Name;
-            VariableExprAST(const std::string& Name) : ExprAST(Type::variable_expr), Name(Name) { }
+            VariableExprAST(const std::string& Name) : ExprAST(Type::variable_expr), DefineType(""), Name(Name) { }
+            VariableExprAST(const std::string& DefineType, const std::string& Name) : ExprAST(Type::variable_expr), DefineType(DefineType), Name(Name) { }
             
     };
 
@@ -124,7 +126,7 @@ namespace AST
     {
         public:
             std::shared_ptr<ExprAST> RetValue;
-            ReturnExprAST() : ExprAST(Type::return_expr), RetValue(nullptr) { }
+            ReturnExprAST(long long LineNumber) : ExprAST(Type::return_expr), RetValue(nullptr) { }
             ReturnExprAST(std::shared_ptr<ExprAST> RetValue) : ExprAST(Type::return_expr), RetValue(RetValue) { }
         
     };

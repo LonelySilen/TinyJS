@@ -35,7 +35,11 @@ namespace Lexer
         // return
         tok_return,
 
-        // if-else for while
+        tok_declare, // var let
+        tok_if,
+        tok_for,
+        tok_while,
+        tok_do,
     };
 
     static std::map<Type, std::string> TokenName {
@@ -51,6 +55,22 @@ namespace Lexer
         { Type::tok_single_char   , "tok_single_char"   },
         { Type::tok_op_cmp        , "tok_op_cmp"        },
         { Type::tok_return        , "tok_return"        },
+        { Type::tok_if            , "tok_if"            },
+        { Type::tok_while         , "tok_while"         },
+        { Type::tok_for           , "tok_for"           },
+        { Type::tok_do            , "tok_do"            },
+        { Type::tok_declare       , "tok_declare"       },
+    };
+
+    static std::map<std::string, Type> KeywordToken {
+        { "function" , Type::tok_function },
+        { "if"       , Type::tok_if       },
+        { "for"      , Type::tok_for      },
+        { "while"    , Type::tok_while    },
+        { "do"       , Type::tok_do       },
+        { "return"   , Type::tok_return   },
+        { "var"      , Type::tok_declare  },
+        { "let"      , Type::tok_declare  },
     };
 
     class Token
@@ -74,7 +94,7 @@ namespace Lexer
 
     public:
         Token CurToken;
-        int LineNumber;
+        long long LineNumber;
 
     public:
         LexerImpl() : LexerImpl(nullptr) {}
@@ -113,6 +133,12 @@ namespace Lexer
         void recover_input() { cin.rdbuf(StreamBackup); }
 
         char get_next_char() { return LastChar; }
+
+        bool is_value_token()
+        {
+            return CurToken.tk_type == Type::tok_integer || CurToken.tk_type == Type::tok_float || CurToken.tk_type == Type::tok_string;
+        }
+
         Token get_next_token()
         {
             // Skip space
@@ -133,16 +159,16 @@ namespace Lexer
                 while (isalnum((LastChar = cin.get())) || LastChar == '_')
                     CurStr += LastChar;
 
-                if (CurStr == "return")
-                    return CurToken = Token(Type::tok_return, CurStr);
-                if (CurStr == "function")
-                    return CurToken = Token(Type::tok_function, CurStr);
+                // Is keyword?
+                if (KeywordToken.find(CurStr) != KeywordToken.end())
+                    return CurToken = Token(KeywordToken[CurStr], CurStr);
                 return CurToken = Token(Type::tok_identifier, CurStr);
             }
 
             // Number
-            // ([0-9]*.[0-9]*)
-            if (isdigit(LastChar))
+            // (-?[0-9]*.[0-9]*)
+            // If previous token is not a number, maybe minus
+            if (isdigit(LastChar) || (LastChar == '-' && !is_value_token()))
             {
                 CurStr = LastChar;
                 while (isdigit(LastChar = cin.get()))

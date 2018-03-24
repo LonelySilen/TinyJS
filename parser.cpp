@@ -19,6 +19,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_experssion()
 //   ::= identifierexpr
 //   ::= parenexpr
 //   ::= numberexpr
+//   ::= returnexpr
 std::shared_ptr<ExprAST> ParserImpl::parser_primary()
 {
 #ifdef LOG
@@ -26,10 +27,14 @@ std::shared_ptr<ExprAST> ParserImpl::parser_primary()
 #endif
     switch (CurToken.tk_type)
     {
+        case Lexer::Type::tok_declare:
+            return parser_variable_define();
         case Lexer::Type::tok_identifier:
             return parser_identifier();
         case Lexer::Type::tok_integer: case Lexer::Type::tok_float: case Lexer::Type::tok_string:
             return parser_value();
+        case Lexer::Type::tok_return:
+            return parser_return();
         case Lexer::Type::tok_single_char:
             if (CurToken.tk_string == "(")
                 return parser_parenExpr();
@@ -120,6 +125,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_value()
 // identifierexpr
 //   ::= identifier
 //   ::= identifier '(' expression* ')'
+// return => VariableExprAST | CallExprAST
 std::shared_ptr<ExprAST> ParserImpl::parser_identifier()
 {
 #ifdef LOG
@@ -151,6 +157,26 @@ std::shared_ptr<ExprAST> ParserImpl::parser_identifier()
     }
     get_next_token(); // eat ')'
     return std::make_shared<CallExprAST>(IdName, Args);
+}
+
+// variablexpr 
+//   ::= 'var' identifier ';'
+//   ::= 'var' identifier binoprhs
+//   ::= 'let' identifier ';'
+//   ::= 'let' identifier binoprhs
+std::shared_ptr<ExprAST> ParserImpl::parser_variable_define()
+{
+#ifdef LOG
+    log("in parser_variable_define");
+#endif
+    auto DefineType = CurToken.tk_string;
+    get_next_token(); // eat declare symbol
+    auto LHS = parser_identifier();
+    if (!LHS || LHS->SubType != AST::Type::variable_expr)
+        parser_log_err("[parser_variable_define] Expected a variable_expr.");
+
+    std::static_pointer_cast<VariableExprAST>(LHS)->DefineType = DefineType;
+    return parser_binaryOpExpr(0, LHS);
 }
 
 // parenexpr ::= '(' expression ')'
@@ -258,7 +284,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_return()
 #endif
     get_next_token(); // eat 'return'
     if (CurToken.tk_string == ";") // just return
-        return std::make_shared<ReturnExprAST>();
+        return std::make_shared<ReturnExprAST>(LineNumber);
 
     auto E = parser_experssion();
     return std::make_shared<ReturnExprAST>(E);

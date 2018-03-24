@@ -45,6 +45,7 @@ namespace Parser
         std::shared_ptr<FunctionAST> parser_function();
         std::shared_ptr<PrototypeAST> parser_prototype();
         std::shared_ptr<ExprAST> parser_return();
+        std::shared_ptr<ExprAST> parser_variable_define();
 
         void parser_init()
         {
@@ -95,16 +96,12 @@ namespace Parser
             // print_token(CurToken);
             switch (CurToken.tk_type)
             {
-                case Lexer::Type::tok_identifier:
-                    return parser_experssion();
                 case Lexer::Type::tok_function:
                     return parser_function();
-                case Lexer::Type::tok_return:
-                    return parser_return();
                 case Lexer::Type::tok_eof:
                     break;
                 default:
-                    parser_log_err("[parser_line] Invalid token!");
+                    return parser_experssion();
             }
             return nullptr;
         }

@@ -2,26 +2,26 @@ a=1+1-7+"hell";
 d = 0;
 c =  1*2*3.0/7%2*d;
 d=1;
-// a=1+2*3;
-// b=a;
-//c=d+(2+23)
 
     //d = "\'asdwb\'"
 
-//function a(p1,p2, p3)
-//{
-//    b=c+d;
-//    f=g+h;
-//    e=b=1;
-//}
+function a1(p1,p2, p3)
+{
+    b=c+d;
+    f=g+h;
+    e=b=1;
+}
 
+//b();
 function b()
 {
     //a=777;
     //return;
     d=666;
     f=100;
-    return 20;
+    var a = -1.11;
+    //a1();
+    return 20+10;
 }
 b();
 a = b()+a+b();
