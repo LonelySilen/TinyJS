@@ -35,42 +35,42 @@ namespace Lexer
         // return
         tok_return,
 
-        tok_declare, // var let
+        tok_variable_declare, // var let
         tok_if,
         tok_for,
         tok_while,
-        tok_do,
+        tok_do_while,
     };
 
     static std::map<Type, std::string> TokenName {
-        { Type::tok_none          , "tok_none"          },
-        { Type::tok_eof           , "tok_eof"           },
+        { Type::tok_none             , "tok_none"             },
+        { Type::tok_eof              , "tok_eof"              },
         // commands
-        { Type::tok_function      , "tok_function"      },
+        { Type::tok_function         , "tok_function"         },
         // primary
-        { Type::tok_identifier    , "tok_identifier"    },
-        { Type::tok_integer       , "tok_integer"       },
-        { Type::tok_float         , "tok_float"         },
-        { Type::tok_string        , "tok_string"        },
-        { Type::tok_single_char   , "tok_single_char"   },
-        { Type::tok_op_cmp        , "tok_op_cmp"        },
-        { Type::tok_return        , "tok_return"        },
-        { Type::tok_if            , "tok_if"            },
-        { Type::tok_while         , "tok_while"         },
-        { Type::tok_for           , "tok_for"           },
-        { Type::tok_do            , "tok_do"            },
-        { Type::tok_declare       , "tok_declare"       },
+        { Type::tok_identifier       , "tok_identifier"       },
+        { Type::tok_integer          , "tok_integer"          },
+        { Type::tok_float            , "tok_float"            },
+        { Type::tok_string           , "tok_string"           },
+        { Type::tok_single_char      , "tok_single_char"      },
+        { Type::tok_op_cmp           , "tok_op_cmp"           },
+        { Type::tok_return           , "tok_return"           },
+        { Type::tok_if               , "tok_if"               },
+        { Type::tok_while            , "tok_while"            },
+        { Type::tok_for              , "tok_for"              },
+        { Type::tok_do_while         , "tok_do_while"         },
+        { Type::tok_variable_declare , "tok_variable_declare" },
     };
 
     static std::map<std::string, Type> KeywordToken {
-        { "function" , Type::tok_function },
-        { "if"       , Type::tok_if       },
-        { "for"      , Type::tok_for      },
-        { "while"    , Type::tok_while    },
-        { "do"       , Type::tok_do       },
-        { "return"   , Type::tok_return   },
-        { "var"      , Type::tok_declare  },
-        { "let"      , Type::tok_declare  },
+        { "function" , Type::tok_function         },
+        { "if"       , Type::tok_if               },
+        { "for"      , Type::tok_for              },
+        { "while"    , Type::tok_while            },
+        { "do"       , Type::tok_do_while         },
+        { "return"   , Type::tok_return           },
+        { "var"      , Type::tok_variable_declare },
+        { "let"      , Type::tok_variable_declare },
     };
 
     class Token
@@ -134,11 +134,6 @@ namespace Lexer
 
         char get_next_char() { return LastChar; }
 
-        bool is_value_token()
-        {
-            return CurToken.tk_type == Type::tok_integer || CurToken.tk_type == Type::tok_float || CurToken.tk_type == Type::tok_string;
-        }
-
         Token get_next_token()
         {
             // Skip space
@@ -168,7 +163,7 @@ namespace Lexer
             // Number
             // (-?[0-9]*.[0-9]*)
             // If previous token is not a number, maybe minus
-            if (isdigit(LastChar) || (LastChar == '-' && !is_value_token()))
+            if (isdigit(LastChar))
             {
                 CurStr = LastChar;
                 while (isdigit(LastChar = cin.get()))
@@ -194,9 +189,10 @@ namespace Lexer
                 {
                     if (cin.peek() == '\\')
                         CurStr += get_special_char();
+                    else
+                        CurStr += cin.get();
                     if (cin.peek() == end_char)
                         break;
-                    CurStr += cin.get();
                 }
                 cin.get(); // eat end_char
                 LastChar = cin.get(); // pre-read a char
@@ -266,7 +262,7 @@ namespace Lexer
 
         char get_special_char()
         {
-            cin.get();
+            cin.get(); // eat '\\'
             char c;
             switch ((c = cin.get()))
             {

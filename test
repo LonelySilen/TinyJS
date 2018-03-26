@@ -1,16 +1,42 @@
-a=1+1-7+"hell";
-d = 0;
-c =  1*2*3.0/7%2*d;
-d=1;
+a = -1;
+
+print(a);
+if (!a)
+{
+    a = 2;
+}
+else
+    a = 3;
+
+print (c);
+
+print(a);
+print("hello\n\n");
+//
+//function h() {return;}
+
+//a=1+1-7+"hell";
+//d = 0;
+//c =  1*2*3.0/7%2*d;
+//d=1;
+
+//function ccc() {return 0;}
+
+//if (1+ccc())
+ //  a="nonnoo";
+//else
+//    a= "9";
+    
+    //a=ccc()+10;
 
     //d = "\'asdwb\'"
 
-function a1(p1,p2, p3)
-{
-    b=c+d;
-    f=g+h;
-    e=b=1;
-}
+//function a1(p1,p2, p3)
+//{
+//    b=c+d;
+//    f=g+h;
+//    e=b=1;
+//}
 
 //b();
 function b()
@@ -19,12 +45,13 @@ function b()
     //return;
     d=666;
     f=100;
-    var a = -1.11;
+    //var a = -1.11;
     //a1();
     return 20+10;
 }
 b();
 a = b()+a+b();
+print(a);
 
 //a_aa=a+1;
 

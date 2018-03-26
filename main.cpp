@@ -25,7 +25,7 @@ void test_parser()
     Parser::ParserImpl t(fin.rdbuf());
     // Parser::ParserImpl t;
     // t.parser();
-    Eval::EvalImpl<decltype(t.parser())> e(t.parser());
+    Eval::EvalImpl e(t.parser());
     e.eval();
 }
 
