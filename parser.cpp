@@ -12,6 +12,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_experssion()
     auto LHS = parser_primary();
     if (!LHS)
         return nullptr;
+
     return parser_binaryOpExpr(0, LHS);
 }
 
@@ -19,7 +20,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_experssion()
 //   ::= identifierexpr
 //   ::= parenexpr
 //   ::= numberexpr
-//   ::= returnexpr
+//   ::= unaryexpr
 std::shared_ptr<ExprAST> ParserImpl::parser_primary()
 {
 #ifdef LOG
@@ -27,28 +28,24 @@ std::shared_ptr<ExprAST> ParserImpl::parser_primary()
 #endif
     switch (CurToken.tk_type)
     {
-        case Lexer::Type::tok_if:
-            return parser_if();
-        case Lexer::Type::tok_while:
-            return parser_while();
-        case Lexer::Type::tok_for:
-            return parser_for();
-        case Lexer::Type::tok_do_while:
-            return parser_do_while();
-        case Lexer::Type::tok_variable_declare:
-            return parser_variable_define();
-        case Lexer::Type::tok_identifier:
-            return parser_identifier();
+        case Lexer::Type::tok_identifier: return parser_identifier();
         case Lexer::Type::tok_integer: case Lexer::Type::tok_float: case Lexer::Type::tok_string:
             return parser_value();
-        case Lexer::Type::tok_return:
-            return parser_return();
+
+        case Lexer::Type::tok_op:
         case Lexer::Type::tok_single_char:
-            if (CurToken.tk_string == "(")
-                return parser_parenExpr();
-            if (CurToken.tk_string == "-" || CurToken.tk_string == "+" || CurToken.tk_string == "!" || CurToken.tk_string == "~")
-                return parser_unaryOpExpr();
-            parser_log_err("[parser_primary] Unknown token.");
+        {
+            switch (CurToken.tk_string[0])
+            {
+                case '-': case '+': case '!': case '~':
+                    return parser_unaryOpExpr();
+                case '(':
+                    return parser_parenExpr();
+                default:
+                    break;
+            }
+        }
+            
         default:
             parser_log_err("[parser_primary] Unknown token.");
     }
@@ -132,7 +129,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_value()
             is_v3 = true;
             break;
         default:
-            parser_log_err("[parser_value] Not a ValueExprAST!");
+            parser_log_err("[parser_value] Not ValueExprAST!");
     }
 
     get_next_token(); // eat Number
@@ -152,37 +149,35 @@ std::shared_ptr<ExprAST> ParserImpl::parser_value()
 //   ::= identifier
 //   ::= identifier '(' expression* ')'
 // return => VariableExprAST | CallExprAST
-std::shared_ptr<ExprAST> ParserImpl::parser_identifier()
+std::shared_ptr<ExprAST> ParserImpl::parser_identifier(const std::string& DefineType)
 {
 #ifdef LOG
     log("in parser_identifier");
 #endif
     std::string IdName = CurToken.tk_string;
-    get_next_token();
-    if (CurToken.tk_string != "(")
-        return std::make_shared<VariableExprAST>(IdName);
+    get_next_token(); // eat identifier
+    auto Var = std::make_shared<VariableExprAST>(DefineType, IdName);
+    auto Op = CurToken.tk_string;
 
-    get_next_token(); // eat '('
-    std::vector<std::shared_ptr<ExprAST>> Args;
-    if (CurToken.tk_string != ")")
+    // Call
+    if (Op[0] == '(')
     {
-        while (true)
-        {
-            if (auto Arg = parser_experssion())
-                Args.push_back(Arg);
-            else
-                parser_log_err("[parser_identifier] Parser Arg Err.");
-
-            if (CurToken.tk_string == ")")
-                break;
-
-            if (CurToken.tk_string != ",")
-                parser_log_err("[parser_identifier] Unexpected an ','!");
-            get_next_token();
-        }
+        del_op(","); // remove ',' from operator
+        auto Args = parser_parameter_list("(", ")", "parser_identifier", ",");
+        set_op(",", 1);
+        return std::make_shared<CallExprAST>(IdName, Args);
     }
-    get_next_token(); // eat ')'
-    return std::make_shared<CallExprAST>(IdName, Args);
+
+    // Assignment
+    if (Op[0] == '=')
+    {
+        get_next_token(); // eat '='
+        if (CurToken.tk_string == "{")
+            return std::make_shared<BinaryOpExprAST>(Op, Var, parser_object());
+        return std::make_shared<BinaryOpExprAST>(Op, Var, parser_experssion());
+    }
+
+    return Var;
 }
 
 // variablexpr 
@@ -195,14 +190,16 @@ std::shared_ptr<ExprAST> ParserImpl::parser_variable_define()
 #ifdef LOG
     log("in parser_variable_define");
 #endif
-    auto DefineType = CurToken.tk_string;
+    auto E = parser_identifier(CurToken.tk_string);
     get_next_token(); // eat declare symbol
-    auto LHS = parser_identifier();
-    if (!LHS || LHS->SubType != AST::Type::variable_expr)
-        parser_log_err("[parser_variable_define] Expected a variable_expr.");
+    return E;
+}
 
-    std::static_pointer_cast<VariableExprAST>(LHS)->DefineType = DefineType;
-    return parser_binaryOpExpr(0, LHS);
+// objectexpr
+//   ::= '{' key:value, key:value, ... '}'
+std::shared_ptr<ExprAST> ParserImpl::parser_object()
+{
+    return nullptr;
 }
 
 // parenexpr ::= '(' expression ')'
@@ -212,7 +209,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_parenExpr()
     log("in parser_parenExpr");
 #endif
     if (CurToken.tk_string != "(")
-        parser_log_err("[parser_parenExpr] Expected an '('!");
+        parser_log_err("[parser_parenExpr] Expected '('!");
     get_next_token(); // eat '('
     
     auto V = parser_experssion();
@@ -220,7 +217,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_parenExpr()
         return nullptr;
 
     if (CurToken.tk_string != ")")
-        parser_log_err("[parser_parenExpr] Expected an ')'!");
+        parser_log_err("[parser_parenExpr] Expected ')'!");
 
     get_next_token(); // eat ')'
     return V;
@@ -239,33 +236,9 @@ std::shared_ptr<PrototypeAST> ParserImpl::parser_prototype()
         get_next_token(); // eat function name
     }
 
-    if (CurToken.tk_string != "(")
-        parser_log_err("[parser_prototype] Expected an '('.");
-    get_next_token(); // eat '('
-
-    // param list
-    std::vector<std::string> Args;
-    if (CurToken.tk_string != ")")
-    {
-        while (true)
-        {
-            if (CurToken.tk_type == Lexer::Type::tok_identifier)
-            {
-                Args.push_back(CurToken.tk_string);
-                get_next_token();
-            }
-            else
-                parser_log_err("[parser_prototype] Unexpected an token.");
-
-            if (CurToken.tk_string == ")")
-                break;
-
-            if (CurToken.tk_string != ",")
-                parser_log_err("[parser_prototype] Expected an ','!");
-            get_next_token();
-        }
-    }
-    get_next_token(); // eat ')'
+    del_op(","); // remove ',' from operator
+    auto Args = parser_parameter_list("(", ")", "parser_prototype", ",");
+    set_op(",", 1);
     return std::make_shared<PrototypeAST>(FnName, Args);
 }
 
@@ -280,7 +253,7 @@ std::shared_ptr<FunctionAST> ParserImpl::parser_function()
     if (!Proto)
         return nullptr;
 
-    auto Body = parser_block("[parser_function]");
+    auto Body = parser_block("function");
     return std::make_shared<FunctionAST>(Proto, Body);
 }
 
@@ -294,9 +267,29 @@ std::shared_ptr<ExprAST> ParserImpl::parser_return()
     if (CurToken.tk_string == ";") // just return
         return std::make_shared<ReturnExprAST>();
 
-    auto E = parser_experssion();
-    return std::make_shared<ReturnExprAST>(E);
+    return std::make_shared<ReturnExprAST>(parser_experssion());
 }
+
+// breakexpr ::= 'break'
+inline std::shared_ptr<ExprAST> ParserImpl::parser_break()
+{
+#ifdef LOG
+    log("in parser_break");
+#endif
+    get_next_token();
+    return std::make_shared<BreakExprAST>();
+}
+
+// continuexpr ::= 'continue'
+inline std::shared_ptr<ExprAST> ParserImpl::parser_continue()
+{
+#ifdef LOG
+    log("in parser_continue");
+#endif
+    get_next_token();
+    return std::make_shared<ContinueExprAST>();
+}
+
 
 // ifexpr
 //   ::= 'if' '(' expression ')' ';'
@@ -312,6 +305,8 @@ std::shared_ptr<ExprAST> ParserImpl::parser_if()
 #endif
     get_next_token(); // eat "if"
     auto Cond = parser_parenExpr();
+    if (!Cond)
+        parser_log_err("[parser_if] Expected cond expression.");
 
     // if (cond) ;
     if (CurToken.tk_string == ";")
@@ -320,32 +315,24 @@ std::shared_ptr<ExprAST> ParserImpl::parser_if()
         return std::make_shared<IfExprAST>(Cond);
     }
 
-    std::vector<std::shared_ptr<ExprAST>> IfStatement;
-    if (CurToken.tk_string != "{")
-        IfStatement.push_back(parser_one()); // if (cond) expression; ...
-    else
-        IfStatement = parser_block("[parser_if]"); // if (cond) { statement } ...
+    auto IfBlock = parser_block("if");
 
     // log(CurToken.tk_string);
     // ... else ...
     if (CurToken.tk_string != "else")
-        return std::make_shared<IfExprAST>(Cond, IfStatement);
+        return std::make_shared<IfExprAST>(Cond, IfBlock);
     get_next_token(); // eat "else"
     
-    decltype(IfStatement) Else_Statement;
     // ... else if ...
     if (CurToken.tk_string == "if")
     {
         auto ElseIf = parser_if();
-        return std::make_shared<IfExprAST>(Cond, IfStatement, ElseIf);            
+        return std::make_shared<IfExprAST>(Cond, IfBlock, ElseIf);            
     }
 
-    if (CurToken.tk_string != "{")
-        Else_Statement.push_back(parser_one()); // ... else expression;
-    else
-        Else_Statement = parser_block("[parser_if]"); // ... else { statement }
+    auto ElseBlock = parser_block("if");
 
-    return std::make_shared<IfExprAST>(Cond, IfStatement, Else_Statement);
+    return std::make_shared<IfExprAST>(Cond, IfBlock, ElseBlock);
 }
 
 std::shared_ptr<ExprAST> ParserImpl::parser_while()
@@ -353,6 +340,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_while()
 #ifdef LOG
     log("in parser_while");
 #endif
+    get_next_token(); // eat 'while'
     return nullptr;
 }
 
@@ -361,6 +349,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_do_while()
 #ifdef LOG
     log("in parser_do_while");
 #endif
+    get_next_token(); // eat 'do'
     return nullptr;
 }
 
@@ -369,16 +358,65 @@ std::shared_ptr<ExprAST> ParserImpl::parser_for()
 #ifdef LOG
     log("in parser_for");
 #endif
-    return nullptr;
+    get_next_token(); // eat 'for'
+    auto Cond = parser_parameter_list("(", ")", "parser_for", ";");
+
+    if (Cond.size() != 3)
+        parser_log_err("[parser_for] 'for' need 3 params.");
+
+    // for (cond) ;
+    if (CurToken.tk_string == ";")
+    {
+        get_next_token(); // eat ';'
+        return std::make_shared<ForExprAST>(Cond);
+    }
+    return std::make_shared<ForExprAST>(Cond, parser_block("for"));
 }
 
-std::vector<std::shared_ptr<ExprAST>> ParserImpl::parser_block(const std::string& err_func_name)
+// paramexpr
+//  ::= '(' expression, ... ')'
+std::vector<std::shared_ptr<ExprAST>> ParserImpl::parser_parameter_list(const std::string& _start, const std::string& _end, const std::string& err_func_name, const std::string& separater)
+{
+#ifdef LOG
+    log("in parser_parameter_list");
+#endif
+    if (CurToken.tk_string != _start)
+        parser_log_err("[" + err_func_name + "] Expected '" + _start + "'.");
+    get_next_token(); // eat _start
+
+    std::vector<std::shared_ptr<ExprAST>> Params;
+    if (CurToken.tk_string != _end)
+    {
+        while (true)
+        {
+            if (auto P = parser_experssion())
+                Params.push_back(P);
+            else
+                parser_log_err("[" + err_func_name + "] Parser Arguments Err.");
+
+            if (CurToken.tk_string == _end)
+                break;
+
+            if (CurToken.tk_string != separater)
+                parser_log_err("[" + err_func_name + "] Unexpected '" + separater + "'!");
+            get_next_token();
+        }
+    }
+    get_next_token(); // eat _end
+    return Params;
+}
+
+
+// blockexpr
+//  ::= '{' statement '}'
+std::shared_ptr<BlockExprAST> ParserImpl::parser_block(const std::string& err_block_name)
 {
 #ifdef LOG
     log("in parser_block");
 #endif
+    // Just a line
     if (CurToken.tk_string != "{")
-        parser_log_err("[parser_block] Not a block.");
+        return std::make_shared<BlockExprAST>(parser_one());
     get_next_token(); // eat "{"
     std::vector<std::shared_ptr<ExprAST>> Statement;
     if (CurToken.tk_string != "}")
@@ -386,12 +424,15 @@ std::vector<std::shared_ptr<ExprAST>> ParserImpl::parser_block(const std::string
         while (true)
         {
             if (auto E = parser_one())
+            {
+                E->LineNumber = LineNumber; // set line number for debug
                 Statement.push_back(E);
+            }
 
             if (CurToken.tk_string == "}")
                 break;
         }
     }
     get_next_token(); // eat "}"
-    return Statement;
+    return std::make_shared<BlockExprAST>(Statement);
 }

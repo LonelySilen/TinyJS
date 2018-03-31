@@ -41,39 +41,42 @@ namespace Parser
         std::shared_ptr<ExprAST> parser_binaryOpExpr(int expr_prce, std::shared_ptr<ExprAST> LHS);
         std::shared_ptr<ExprAST> parser_primary();
         std::shared_ptr<ExprAST> parser_value();
-        std::shared_ptr<ExprAST> parser_identifier();
+        std::shared_ptr<ExprAST> parser_object();
+        std::shared_ptr<ExprAST> parser_identifier(const std::string& DefineType = "");
         std::shared_ptr<ExprAST> parser_parenExpr();
         std::shared_ptr<FunctionAST> parser_function();
         std::shared_ptr<PrototypeAST> parser_prototype();
         std::shared_ptr<ExprAST> parser_return();
+        std::shared_ptr<ExprAST> parser_break();
+        std::shared_ptr<ExprAST> parser_continue();
         std::shared_ptr<ExprAST> parser_variable_define();
         std::shared_ptr<ExprAST> parser_if();
         std::shared_ptr<ExprAST> parser_while();
         std::shared_ptr<ExprAST> parser_do_while();
         std::shared_ptr<ExprAST> parser_for();
-        
-        std::vector<std::shared_ptr<ExprAST>> parser_block(const std::string& err_info); /* { statement } */
+        std::shared_ptr<BlockExprAST> parser_block(const std::string& err_block_name = "__anony");
+        /* param list */
+        std::vector<std::shared_ptr<ExprAST>> parser_parameter_list(const std::string& _start, const std::string& _end, const std::string& err_func_name, const std::string& separater);
+
 
         void parser_init()
         {
             if (BinOpPrecedence.empty())
             {
+                BinOpPrecedence[","] = 30;
                 BinOpPrecedence["&&"] = 40;
                 BinOpPrecedence["||"] = 40;
-                BinOpPrecedence["="] = 50;
+                BinOpPrecedence[">>"] = 40;
+                BinOpPrecedence["<<"] = 40;
                 BinOpPrecedence[">"] = 60;
                 BinOpPrecedence["<"] = 60;
                 BinOpPrecedence[">="] = 60;
                 BinOpPrecedence["<="] = 60;
                 BinOpPrecedence["=="] = 60;
                 BinOpPrecedence["!="] = 60;
-                // BinOpPrecedence["!"] = 60;
-                BinOpPrecedence[">>"] = 70;
-                BinOpPrecedence["<<"] = 70;
                 BinOpPrecedence["&"] = 80;
                 BinOpPrecedence["|"] = 80;
                 BinOpPrecedence["^"] = 80;
-                // BinOpPrecedence["~"] = 80;
                 BinOpPrecedence["+"] = 90;
                 BinOpPrecedence["-"] = 90;
                 BinOpPrecedence["*"] = 100;
@@ -94,13 +97,21 @@ namespace Parser
             get_next_token();
             while (!cin.eof())
             {
-                // cout << "ready> ";
+                // cout << "ready> " << "in line: " << LineNumber << endl;
                 if (CurToken.tk_type == Lexer::Type::tok_eof) // End of file
                     break;
-                ParserResult.push_back(parser_one());
+                auto E = parser_one();
+                E->LineNumber = LineNumber;
+                ParserResult.push_back(E);
             }
             return std::move(ParserResult);
         }
+
+        void set_op(const std::string& Op, int Level)
+        { BinOpPrecedence[Op] = Level; }
+
+        void del_op(const std::string& Op)
+        { BinOpPrecedence.erase(Op); }
 
         std::shared_ptr<ExprAST> parser_one() 
         {
@@ -108,28 +119,34 @@ namespace Parser
             log("\nin parser_one");
         #endif
             // print_token(CurToken);
+            std::shared_ptr<ExprAST> ret;
             switch (CurToken.tk_type)
-            { 
-                /* These are not need ';' to end */
-                case Lexer::Type::tok_function:
-                    return parser_function();
-                case Lexer::Type::tok_if:
-                    return parser_if();
-                case Lexer::Type::tok_eof:
-                    break;
-                default: /* need ';' for end */
+            {
+                case Lexer::Type::tok_function: ret = parser_function(); break;
+                case Lexer::Type::tok_if:       ret = parser_if();       break;
+                case Lexer::Type::tok_while:    ret = parser_while();    break;
+                case Lexer::Type::tok_for:      ret = parser_for();      break;
+                case Lexer::Type::tok_do_while: ret = parser_do_while(); break;
+                case Lexer::Type::tok_variable_declare: ret = parser_variable_define(); break;
+                case Lexer::Type::tok_return:   ret = parser_return();   break;
+                case Lexer::Type::tok_break:    ret = parser_break();    break;
+                case Lexer::Type::tok_continue: ret = parser_continue(); break;
+                case Lexer::Type::tok_eof:      return nullptr;
+                default:
                 {
-                    if (auto ret = parser_experssion()) 
+                    if (CurToken.tk_string[0] == '{')
+                        ret = parser_block();
+                    else
                     {
-                        if (CurToken.tk_string != ";")
-                            parser_log_err("[parser_one] Expected a ';'.");
-                        get_next_token(); // eat ";"
-                        return ret;
+                        set_op(",", 1); // for domma expression
+                        ret = parser_experssion();
                     }
                     break;
                 }
             }
-            return nullptr;
+            while (CurToken.tk_string == ";")
+                get_next_token(); // eat ";"
+            return ret;
         }
 
         void parser_log_err(const std::string& loginfo)

@@ -15,6 +15,7 @@ namespace Eval
 
     class EvalImpl
     {
+    using IntType = long long;
     using T = std::vector<std::shared_ptr<ExprAST>>;
     using EnvImpl = EnvImpl<T::value_type>;
     
@@ -24,7 +25,7 @@ namespace Eval
         std::shared_ptr<EnvImpl> CurScope;
         const std::string TopScope = "__top_expression";
         T Expression; // T := vector<unique_ptr<ExprAST>>
-        long long LineNumber;
+        unsigned long long EvalLineNumber;
         std::string ERR_INFO;
 
     public:
@@ -36,7 +37,7 @@ namespace Eval
                 init_built_in();
                 CurScope.reset(new EnvImpl(TopScope));
                 Scope = CurScope;
-                LineNumber = 1;
+                EvalLineNumber = 1;
                 ERR_INFO = "";
             }
         }
@@ -67,10 +68,10 @@ namespace Eval
                 if (F->Args.size() == 1)
                 {
                     auto arg = F->Args[0];
-                    print_value(arg);
+                    print_value(eval_expression(arg));
                 }
             }
-            return nullptr;
+            return F;
         }
         /* <-- Built-In --> */
 
@@ -112,6 +113,21 @@ namespace Eval
             return _CurScope;
         }
 
+        bool is_top_scope()
+        { return CurScope.parent ? true : false; }
+
+        void can_break_control_flow(std::shared_ptr<ExprAST> E)
+        {
+            switch (E->SubType)
+            {
+                case Type::break_expr: case Type::continue_expr: case Type::return_expr:
+                    if (is_top_scope())
+                        eval_err();
+                default:
+                    break;
+            }
+        }
+
         // Find exist name
         // if (!find_name()) => Check name is exist?
         std::shared_ptr<ExprAST> find_name(const std::string& Name)
@@ -124,6 +140,24 @@ namespace Eval
         {
             find_name_belong_scope(Name)->set(Name, Value);
             return true;
+        }
+
+        // get name
+        std::string get_name(std::shared_ptr<ExprAST> V)
+        {
+            switch (V->SubType)
+            {
+                case Type::variable_expr:
+                    return std::static_pointer_cast<VariableExprAST>(V)->Name;
+                case Type::binary_op_expr:
+                    return get_name(std::static_pointer_cast<BinaryOpExprAST>(V)->LHS);
+                case Type::call_expr:
+                    return std::static_pointer_cast<CallExprAST>(V)->Callee;
+                case Type::function_expr:
+                    return std::static_pointer_cast<FunctionAST>(V)->Proto->Name;
+                default:
+                    return "";
+            }
         }
 
         // Type conversion: integer float string => bool
@@ -193,7 +227,7 @@ namespace Eval
                     auto _var = get_variable_value(_v);
                     if (!_var)
                     {
-                        std::cout << "[print_value] '"<< _v->Name << "' Undefined." << std::endl;
+                        std::cout << "[warnning] Variable '"<< _v->Name << "' = undefined." << std::endl;
                         return;
                     }
 
@@ -202,7 +236,8 @@ namespace Eval
                     break;
                 }
                 default:
-                    std::cout << "[print_value] ExprAST(V) Undefined." << std::endl;
+                    std::cout << "[print_value] ExprAST Undefined." << std::endl;
+                    V->print_ast();
                     break;
             }
         }
@@ -210,6 +245,9 @@ namespace Eval
 
         std::shared_ptr<ExprAST> eval_function_expr(std::shared_ptr<FunctionAST> F);
         std::shared_ptr<ExprAST> eval_if_else(std::shared_ptr<IfExprAST> If);
+        std::shared_ptr<ExprAST> eval_for(std::shared_ptr<ForExprAST> For);
+        std::shared_ptr<ExprAST> eval_while(std::shared_ptr<WhileExprAST> While);
+        std::shared_ptr<ExprAST> eval_do_while(std::shared_ptr<DoWhileExprAST> DoWhile);
         std::shared_ptr<ExprAST> eval_call_expr(std::shared_ptr<CallExprAST> Caller);
         std::shared_ptr<ExprAST> eval_unary_op_expr(std::shared_ptr<UnaryOpExprAST> expr);
         /* Binary op expr */
@@ -223,8 +261,8 @@ namespace Eval
         {
             for (auto& i : Expression)
             {
+                EvalLineNumber = i->LineNumber;
                 eval_one(i);
-                LineNumber++;
             }
         }
 
@@ -234,11 +272,7 @@ namespace Eval
             switch (expr->SubType)
             {
                 case Type::function_expr:
-                {
-                    auto func = std::static_pointer_cast<FunctionAST>(expr);
-                    LineNumber += func->Body.size();
-                    return eval_function_expr(func);
-                }
+                    return eval_function_expr(std::static_pointer_cast<FunctionAST>(expr));
                 default:
                     return eval_expression(expr);
             }
@@ -249,13 +283,18 @@ namespace Eval
         {
             switch (E->SubType)
             {
-                case Type::integer_expr: 
-                case Type::float_expr: 
-                case Type::string_expr:
+                case Type::return_expr: case Type::break_expr: case Type::continue_expr:
+                case Type::integer_expr: case Type::float_expr: case Type::string_expr:
                 case Type::variable_expr:
                     return E;
                 case Type::if_else_expr:
                     return eval_if_else(std::static_pointer_cast<IfExprAST>(E));
+                case Type::for_expr:
+                    return eval_for(std::static_pointer_cast<ForExprAST>(E));
+                case Type::while_expr:
+                    return eval_while(std::static_pointer_cast<WhileExprAST>(E));
+                case Type::do_while_expr:
+                    return eval_do_while(std::static_pointer_cast<DoWhileExprAST>(E));
                 case Type::unary_op_expr:
                     return eval_unary_op_expr(std::static_pointer_cast<UnaryOpExprAST>(E));
                 case Type::binary_op_expr:
@@ -271,7 +310,7 @@ namespace Eval
 
         void eval_err(const std::string& loginfo)
         {
-            std::cerr << "[Eval Error] in line: " << LineNumber << std::endl;
+            std::cerr << "[Eval Error] in line: " << EvalLineNumber << std::endl;
             std::cerr << loginfo << std::endl;
             exit(1);
         }
@@ -287,10 +326,16 @@ namespace Eval
         std::shared_ptr<ExprAST> _mod(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
         std::shared_ptr<ExprAST> _not(const std::shared_ptr<ExprAST> RHS); /* '!' */
 
+        std::shared_ptr<ExprAST> _greater(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
+        std::shared_ptr<ExprAST> _less(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
+        std::shared_ptr<ExprAST> _not_more(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
+        std::shared_ptr<ExprAST> _not_less(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
+        std::shared_ptr<ExprAST> _equal(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
+
         std::shared_ptr<ExprAST> _and(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
         std::shared_ptr<ExprAST> _or(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
-        std::shared_ptr<ExprAST> _rshift(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
-        std::shared_ptr<ExprAST> _lshift(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
+        std::shared_ptr<ExprAST> _bit_rshift(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
+        std::shared_ptr<ExprAST> _bit_lshift(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
         std::shared_ptr<ExprAST> _bit_and(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
         std::shared_ptr<ExprAST> _bit_or(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);
         std::shared_ptr<ExprAST> _bit_xor(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS);

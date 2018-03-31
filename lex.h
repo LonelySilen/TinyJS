@@ -28,12 +28,11 @@ namespace Lexer
         tok_float,
         tok_string,
 
-        // Op
-        tok_single_char, // single char op
-        // >, <, ==, >=, <=, !=
-        tok_op_cmp,
-        // return
+        tok_single_char,
+        tok_op,
         tok_return,
+        tok_break,
+        tok_continue,
 
         tok_variable_declare, // var let
         tok_if,
@@ -53,7 +52,7 @@ namespace Lexer
         { Type::tok_float            , "tok_float"            },
         { Type::tok_string           , "tok_string"           },
         { Type::tok_single_char      , "tok_single_char"      },
-        { Type::tok_op_cmp           , "tok_op_cmp"           },
+        { Type::tok_op               , "tok_op"               },
         { Type::tok_return           , "tok_return"           },
         { Type::tok_if               , "tok_if"               },
         { Type::tok_while            , "tok_while"            },
@@ -68,9 +67,11 @@ namespace Lexer
         { "for"      , Type::tok_for              },
         { "while"    , Type::tok_while            },
         { "do"       , Type::tok_do_while         },
-        { "return"   , Type::tok_return           },
         { "var"      , Type::tok_variable_declare },
         { "let"      , Type::tok_variable_declare },
+        { "return"   , Type::tok_return           },
+        { "break"    , Type::tok_break            },
+        { "continue" , Type::tok_continue         },
     };
 
     class Token
@@ -87,6 +88,8 @@ namespace Lexer
 
     class LexerImpl
     {
+        using IntType = unsigned long long;
+
     private:
         std::streambuf* StreamBackup;
         std::string CurStr;
@@ -94,7 +97,7 @@ namespace Lexer
 
     public:
         Token CurToken;
-        long long LineNumber;
+        IntType LineNumber;
 
     public:
         LexerImpl() : LexerImpl(nullptr) {}
@@ -205,49 +208,33 @@ namespace Lexer
             {
                 while (cin.peek() != '\n' && cin.peek() != '\r')
                     cin.get();
-                LastChar = cin.peek(); // pre-read a char
+                while (cin.peek() == '\n' || cin.peek() == '\r')
+                {
+                    LineNumber++;
+                    cin.get();
+                }
+                LastChar = cin.get();
                 return get_next_token();
             }
 
-            // Compare Operator
-            // (>|<|=|>=|<=|==|!=)
+            // Operator
             CurStr = LastChar;
             switch (LastChar)
             {
-                case '>':
-                    if (cin.peek() == '=')
-                        CurStr += cin.get();
-                    CurToken = Token(Type::tok_op_cmp, CurStr);
+                case '+': case '-':
+                case '*': case '/':
+                case '>': case '<':
+                case '=': case '!':
+                    double_char_op('>');
+                    double_char_op('<');
+                    double_char_op('=');
                     break;
 
-                case '<':
-                    if (cin.peek() == '=')
-                        CurStr += cin.get();
-                    CurToken = Token(Type::tok_op_cmp, CurStr);
+                case '&':
+                    double_char_op('&');
                     break;
-
-                case '=':
-                    if (cin.peek() == '=')
-                    {
-                        CurStr += cin.get();
-                        CurToken = Token(Type::tok_op_cmp, CurStr);
-                    }
-                    else
-                    {
-                        CurToken = Token(Type::tok_single_char, CurStr);
-                    }
-                    break;
-
-                case '!':
-                    if (cin.peek() == '=')
-                    {
-                        CurStr += cin.get();
-                        CurToken = Token(Type::tok_op_cmp, CurStr);
-                    }
-                    else
-                    {
-                        CurToken = Token(Type::tok_single_char, CurStr);
-                    }
+                case '|':
+                    double_char_op('|');
                     break;
 
                 default:
@@ -258,6 +245,13 @@ namespace Lexer
             LastChar = cin.get(); // pre-read a char
             // Single char
             return CurToken;
+        }
+
+        void double_char_op(char c)
+        {
+            if (cin.peek() == c)
+                CurStr += cin.get();
+            CurToken = Token(Type::tok_op, CurStr);
         }
 
         char get_special_char()
