@@ -4,9 +4,10 @@
 #include <cstdio>
 #include <iostream>
 #include <fstream>
+#include <ctime>
 using std::cin;
 using std::cout;
-// using namespace TinyJS;
+using std::endl;
 
 void test_lexer()
 {
@@ -21,18 +22,19 @@ void test_lexer()
 
 void test_parser()
 {
-    std::ifstream fin("test");
+    std::ifstream fin("test2");
     Parser::ParserImpl t(fin.rdbuf());
-    // Parser::ParserImpl t;
-    // t.parser();
     Eval::EvalImpl e(t.parser());
     e.eval();
 }
 
 int main()
 {
-    // test_lexer();
+    clock_t _start, _end;
+    _start = clock();
     test_parser();
+    _end = clock();
+    cout << "Time : " << double(_end - _start) / CLOCKS_PER_SEC << endl;
     return 0;
 }
 

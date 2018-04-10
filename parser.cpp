@@ -47,7 +47,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_primary()
         }
             
         default:
-            parser_log_err("[parser_primary] Unknown token.");
+            parser_err("[parser_primary] Unknown token.");
     }
     return nullptr;
 }
@@ -129,7 +129,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_value()
             is_v3 = true;
             break;
         default:
-            parser_log_err("[parser_value] Not ValueExprAST!");
+            parser_err("[parser_value] Not ValueExprAST!");
     }
 
     get_next_token(); // eat Number
@@ -156,28 +156,15 @@ std::shared_ptr<ExprAST> ParserImpl::parser_identifier(const std::string& Define
 #endif
     std::string IdName = CurToken.tk_string;
     get_next_token(); // eat identifier
-    auto Var = std::make_shared<VariableExprAST>(DefineType, IdName);
     auto Op = CurToken.tk_string;
 
     // Call
     if (Op[0] == '(')
     {
-        del_op(","); // remove ',' from operator
         auto Args = parser_parameter_list("(", ")", "parser_identifier", ",");
-        set_op(",", 1);
         return std::make_shared<CallExprAST>(IdName, Args);
     }
-
-    // Assignment
-    if (Op[0] == '=')
-    {
-        get_next_token(); // eat '='
-        if (CurToken.tk_string == "{")
-            return std::make_shared<BinaryOpExprAST>(Op, Var, parser_object());
-        return std::make_shared<BinaryOpExprAST>(Op, Var, parser_experssion());
-    }
-
-    return Var;
+    return std::make_shared<VariableExprAST>(DefineType, IdName);
 }
 
 // variablexpr 
@@ -190,9 +177,21 @@ std::shared_ptr<ExprAST> ParserImpl::parser_variable_define()
 #ifdef LOG
     log("in parser_variable_define");
 #endif
-    auto E = parser_identifier(CurToken.tk_string);
-    get_next_token(); // eat declare symbol
-    return E;
+    if (CurToken.tk_string == "let" || CurToken.tk_string == "var")
+    {
+        auto DefineType = CurToken.tk_string;
+        get_next_token(); // eat declare symbol
+        auto LHS = parser_identifier(DefineType);
+        if (CurToken.tk_string == ";")
+            return LHS;
+
+        auto BinOp = CurToken.tk_string;
+        get_next_token(); // eat BinOp
+
+        auto RHS = parser_experssion();
+        return std::make_shared<BinaryOpExprAST>(BinOp, LHS, RHS);
+    }
+    return parser_experssion();
 }
 
 // objectexpr
@@ -209,7 +208,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_parenExpr()
     log("in parser_parenExpr");
 #endif
     if (CurToken.tk_string != "(")
-        parser_log_err("[parser_parenExpr] Expected '('!");
+        parser_err("[parser_parenExpr] Expected '('!");
     get_next_token(); // eat '('
     
     auto V = parser_experssion();
@@ -217,7 +216,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_parenExpr()
         return nullptr;
 
     if (CurToken.tk_string != ")")
-        parser_log_err("[parser_parenExpr] Expected ')'!");
+        parser_err("[parser_parenExpr] Expected ')'!");
 
     get_next_token(); // eat ')'
     return V;
@@ -236,9 +235,7 @@ std::shared_ptr<PrototypeAST> ParserImpl::parser_prototype()
         get_next_token(); // eat function name
     }
 
-    del_op(","); // remove ',' from operator
     auto Args = parser_parameter_list("(", ")", "parser_prototype", ",");
-    set_op(",", 1);
     return std::make_shared<PrototypeAST>(FnName, Args);
 }
 
@@ -306,7 +303,7 @@ std::shared_ptr<ExprAST> ParserImpl::parser_if()
     get_next_token(); // eat "if"
     auto Cond = parser_parenExpr();
     if (!Cond)
-        parser_log_err("[parser_if] Expected cond expression.");
+        parser_err("[parser_if] Expected cond expression.");
 
     // if (cond) ;
     if (CurToken.tk_string == ";")
@@ -341,7 +338,14 @@ std::shared_ptr<ExprAST> ParserImpl::parser_while()
     log("in parser_while");
 #endif
     get_next_token(); // eat 'while'
-    return nullptr;
+    auto Cond = parser_parenExpr();
+    if (CurToken.tk_string == ";")
+    {
+        get_next_token();
+        return std::make_shared<WhileExprAST>(Cond);
+    }
+    auto Block = parser_block();
+    return std::make_shared<WhileExprAST>(Cond, Block);
 }
 
 std::shared_ptr<ExprAST> ParserImpl::parser_do_while()
@@ -350,7 +354,11 @@ std::shared_ptr<ExprAST> ParserImpl::parser_do_while()
     log("in parser_do_while");
 #endif
     get_next_token(); // eat 'do'
-    return nullptr;
+    auto Block = parser_block();
+    get_next_token(); // eat 'while'
+    auto Cond = parser_parenExpr();
+    get_next_token(); // eat ';'
+    return std::make_shared<DoWhileExprAST>(Block, Cond);
 }
 
 std::shared_ptr<ExprAST> ParserImpl::parser_for()
@@ -359,10 +367,17 @@ std::shared_ptr<ExprAST> ParserImpl::parser_for()
     log("in parser_for");
 #endif
     get_next_token(); // eat 'for'
-    auto Cond = parser_parameter_list("(", ")", "parser_for", ";");
+    get_next_token(); // eat '('
+    std::vector<std::shared_ptr<ExprAST>> Cond;
+    Cond.push_back(parser_variable_define());
+    get_next_token(); // eat ';'
+    Cond.push_back(parser_experssion());
+    get_next_token(); // eat ';'
+    Cond.push_back(parser_experssion());
+    get_next_token(); // eat ')'
 
     if (Cond.size() != 3)
-        parser_log_err("[parser_for] 'for' need 3 params.");
+        parser_err("[parser_for] 'for' need 3 params.");
 
     // for (cond) ;
     if (CurToken.tk_string == ";")
@@ -380,8 +395,9 @@ std::vector<std::shared_ptr<ExprAST>> ParserImpl::parser_parameter_list(const st
 #ifdef LOG
     log("in parser_parameter_list");
 #endif
+    del_op(","); // remove ',' from operator
     if (CurToken.tk_string != _start)
-        parser_log_err("[" + err_func_name + "] Expected '" + _start + "'.");
+        parser_err("[" + err_func_name + "] Expected '" + _start + "'.");
     get_next_token(); // eat _start
 
     std::vector<std::shared_ptr<ExprAST>> Params;
@@ -392,17 +408,18 @@ std::vector<std::shared_ptr<ExprAST>> ParserImpl::parser_parameter_list(const st
             if (auto P = parser_experssion())
                 Params.push_back(P);
             else
-                parser_log_err("[" + err_func_name + "] Parser Arguments Err.");
+                parser_err("[" + err_func_name + "] Parser Arguments Err.");
 
             if (CurToken.tk_string == _end)
                 break;
 
             if (CurToken.tk_string != separater)
-                parser_log_err("[" + err_func_name + "] Unexpected '" + separater + "'!");
+                parser_err("[" + err_func_name + "] Unexpected '" + separater + "'!");
             get_next_token();
         }
     }
     get_next_token(); // eat _end
+    set_op(",", 1);
     return Params;
 }
 

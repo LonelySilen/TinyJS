@@ -14,31 +14,18 @@ namespace Lexer
 
     enum class Type: char
     {
-        tok_none,
-        tok_eof,
+        tok_none, tok_eof,
 
         // commands
         tok_function,
-
         // primary
         tok_identifier,
-
         // value
-        tok_integer,
-        tok_float,
-        tok_string,
-
-        tok_single_char,
-        tok_op,
-        tok_return,
-        tok_break,
-        tok_continue,
+        tok_integer, tok_float, tok_string, tok_single_char, tok_op, 
+        tok_return, tok_break, tok_continue,
 
         tok_variable_declare, // var let
-        tok_if,
-        tok_for,
-        tok_while,
-        tok_do_while,
+        tok_if, tok_for, tok_while, tok_do_while,
     };
 
     static std::map<Type, std::string> TokenName {

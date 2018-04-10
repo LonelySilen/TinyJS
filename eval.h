@@ -8,6 +8,8 @@
 #include "env.h"
 #include "log.h"
 
+// #define elog
+
 namespace Eval
 {
     using namespace AST;
@@ -61,7 +63,7 @@ namespace Eval
 
         std::shared_ptr<ExprAST> exec_built_in(std::shared_ptr<ExprAST> Func)
         {
-            auto F = std::static_pointer_cast<CallExprAST>(Func);
+            auto F = ptr_to<CallExprAST>(Func);
             auto Name = F->Callee;
             if (Name == "print")
             {
@@ -84,14 +86,10 @@ namespace Eval
         }
 
         void enter_new_env()
-        {
-            CurScope.reset(new EnvImpl(CurScope));
-        }
+        { CurScope.reset(new EnvImpl(CurScope)); }
 
         void enter_new_env(const std::string& Name)
-        {
-            CurScope.reset(new EnvImpl(Name, CurScope));
-        }
+        { CurScope.reset(new EnvImpl(Name, CurScope)); }
 
         void recover_prev_env()
         {
@@ -114,17 +112,18 @@ namespace Eval
         }
 
         bool is_top_scope()
-        { return CurScope.parent ? true : false; }
+        { return CurScope->Parent ? false : true; }
 
-        void can_break_control_flow(std::shared_ptr<ExprAST> E)
+        bool is_interrupt_control_flow(std::shared_ptr<ExprAST> E)
         {
             switch (E->SubType)
             {
                 case Type::break_expr: case Type::continue_expr: case Type::return_expr:
                     if (is_top_scope())
-                        eval_err();
+                        eval_err("Uncaught SyntaxError: Illegal " + E->get_ast_name() + " statement");
+                    return true;
                 default:
-                    break;
+                    return false;
             }
         }
 
@@ -136,10 +135,9 @@ namespace Eval
         }
 
         // Set a variable or function
-        bool set_name(const std::string& Name, std::shared_ptr<ExprAST> Value)
+        void set_name(const std::string& Name, std::shared_ptr<ExprAST> Value)
         {
             find_name_belong_scope(Name)->set(Name, Value);
-            return true;
         }
 
         // get name
@@ -148,13 +146,13 @@ namespace Eval
             switch (V->SubType)
             {
                 case Type::variable_expr:
-                    return std::static_pointer_cast<VariableExprAST>(V)->Name;
+                    return ptr_to<VariableExprAST>(V)->Name;
                 case Type::binary_op_expr:
-                    return get_name(std::static_pointer_cast<BinaryOpExprAST>(V)->LHS);
+                    return get_name(ptr_to<BinaryOpExprAST>(V)->LHS);
                 case Type::call_expr:
-                    return std::static_pointer_cast<CallExprAST>(V)->Callee;
+                    return ptr_to<CallExprAST>(V)->Callee;
                 case Type::function_expr:
-                    return std::static_pointer_cast<FunctionAST>(V)->Proto->Name;
+                    return ptr_to<FunctionAST>(V)->Proto->Name;
                 default:
                     return "";
             }
@@ -163,23 +161,26 @@ namespace Eval
         // Type conversion: integer float string => bool
         bool value_to_bool(std::shared_ptr<ExprAST> V)
         {
+        #ifdef elog
+            log("in value_to_bool");
+        #endif
             switch (V->SubType)
             {
                 case Type::integer_expr:
-                    if (std::static_pointer_cast<IntegerValueExprAST>(V)->Val)
+                    if (ptr_to<IntegerValueExprAST>(V)->Val)
                         return true;
                     return false;
                 case Type::float_expr:
-                    if (std::static_pointer_cast<FloatValueExprAST>(V)->Val)
+                    if (ptr_to<FloatValueExprAST>(V)->Val)
                         return true;
                     return false;
                 case Type::string_expr:
-                    if (std::static_pointer_cast<StringValueExprAST>(V)->Val.length())
+                    if (ptr_to<StringValueExprAST>(V)->Val.length())
                         return true;
                     return false;
                 case Type::variable_expr:
                 {
-                    auto v = std::static_pointer_cast<VariableExprAST>(V);
+                    auto v = ptr_to<VariableExprAST>(V);
                     auto _v = find_name(v->Name);
                     if (!_v)
                     {
@@ -194,16 +195,23 @@ namespace Eval
             return false;
         }
 
+        // Point transform
+        template <typename T>
+        inline std::shared_ptr<T> ptr_to(std::shared_ptr<ExprAST> P)
+        {
+            return std::static_pointer_cast<T>(P);
+        }
+
         // get Integer or Float or String
         template <typename T>
         typename T::value_type get_value(std::shared_ptr<ExprAST> V)
         {
-            return std::static_pointer_cast<T>(V)->Val;
+            return ptr_to<T>(V)->Val;
         }
 
-        std::shared_ptr<ExprAST> get_variable_value(std::shared_ptr<VariableExprAST> V)
+        std::shared_ptr<ExprAST> get_variable_value(std::shared_ptr<ExprAST> V)
         {
-            auto v = find_name(V->Name);
+            auto v = find_name(ptr_to<VariableExprAST>(V)->Name);
             if (!v) return nullptr;
             return v;
         }
@@ -223,7 +231,7 @@ namespace Eval
                     break;
                 case Type::variable_expr:
                 {
-                    auto _v = std::static_pointer_cast<VariableExprAST>(V);
+                    auto _v = ptr_to<VariableExprAST>(V);
                     auto _var = get_variable_value(_v);
                     if (!_var)
                     {
@@ -242,8 +250,8 @@ namespace Eval
             }
         }
 
-
         std::shared_ptr<ExprAST> eval_function_expr(std::shared_ptr<FunctionAST> F);
+        std::shared_ptr<ExprAST> eval_return(std::shared_ptr<ReturnExprAST> R);
         std::shared_ptr<ExprAST> eval_if_else(std::shared_ptr<IfExprAST> If);
         std::shared_ptr<ExprAST> eval_for(std::shared_ptr<ForExprAST> For);
         std::shared_ptr<ExprAST> eval_while(std::shared_ptr<WhileExprAST> While);
@@ -272,7 +280,7 @@ namespace Eval
             switch (expr->SubType)
             {
                 case Type::function_expr:
-                    return eval_function_expr(std::static_pointer_cast<FunctionAST>(expr));
+                    return eval_function_expr(ptr_to<FunctionAST>(expr));
                 default:
                     return eval_expression(expr);
             }
@@ -288,19 +296,19 @@ namespace Eval
                 case Type::variable_expr:
                     return E;
                 case Type::if_else_expr:
-                    return eval_if_else(std::static_pointer_cast<IfExprAST>(E));
+                    return eval_if_else(ptr_to<IfExprAST>(E));
                 case Type::for_expr:
-                    return eval_for(std::static_pointer_cast<ForExprAST>(E));
+                    return eval_for(ptr_to<ForExprAST>(E));
                 case Type::while_expr:
-                    return eval_while(std::static_pointer_cast<WhileExprAST>(E));
+                    return eval_while(ptr_to<WhileExprAST>(E));
                 case Type::do_while_expr:
-                    return eval_do_while(std::static_pointer_cast<DoWhileExprAST>(E));
+                    return eval_do_while(ptr_to<DoWhileExprAST>(E));
                 case Type::unary_op_expr:
-                    return eval_unary_op_expr(std::static_pointer_cast<UnaryOpExprAST>(E));
+                    return eval_unary_op_expr(ptr_to<UnaryOpExprAST>(E));
                 case Type::binary_op_expr:
-                    return eval_binary_op_expr(std::static_pointer_cast<BinaryOpExprAST>(E));
+                    return eval_binary_op_expr(ptr_to<BinaryOpExprAST>(E));
                 case Type::call_expr:
-                    return eval_call_expr(std::static_pointer_cast<CallExprAST>(E));
+                    return eval_call_expr(ptr_to<CallExprAST>(E));
                 default:
                     E->print_ast();
                     eval_err("Illegal statement");

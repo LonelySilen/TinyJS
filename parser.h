@@ -23,6 +23,10 @@ namespace Parser
         std::unordered_map<std::string, int> BinOpPrecedence;
         int get_tok_prec(const std::string& op) { return BinOpPrecedence.find(op) != BinOpPrecedence.end() ? BinOpPrecedence[op] : -1; }
     
+    private:
+        /* param list */
+        std::vector<std::shared_ptr<ExprAST>> parser_parameter_list(const std::string& _start, const std::string& _end, const std::string& err_func_name, const std::string& separater);
+
     public:
         ParserImpl() : ParserImpl(nullptr) { }
         ParserImpl(std::streambuf* sptr) : LexerImpl(sptr) { parser_init(); }
@@ -55,15 +59,18 @@ namespace Parser
         std::shared_ptr<ExprAST> parser_do_while();
         std::shared_ptr<ExprAST> parser_for();
         std::shared_ptr<BlockExprAST> parser_block(const std::string& err_block_name = "__anony");
-        /* param list */
-        std::vector<std::shared_ptr<ExprAST>> parser_parameter_list(const std::string& _start, const std::string& _end, const std::string& err_func_name, const std::string& separater);
 
+        void set_op(const std::string& Op, int Level)
+        { BinOpPrecedence[Op] = Level; }
+
+        void del_op(const std::string& Op)
+        { BinOpPrecedence.erase(Op); }
 
         void parser_init()
         {
             if (BinOpPrecedence.empty())
             {
-                BinOpPrecedence[","] = 30;
+                BinOpPrecedence["="] = 30;
                 BinOpPrecedence["&&"] = 40;
                 BinOpPrecedence["||"] = 40;
                 BinOpPrecedence[">>"] = 40;
@@ -84,6 +91,7 @@ namespace Parser
                 BinOpPrecedence["%"] = 100;
             }
             ParserResult.clear();
+            set_op(",", 1); // for domma expression
         }
 
         void parser_reset()
@@ -106,12 +114,6 @@ namespace Parser
             }
             return std::move(ParserResult);
         }
-
-        void set_op(const std::string& Op, int Level)
-        { BinOpPrecedence[Op] = Level; }
-
-        void del_op(const std::string& Op)
-        { BinOpPrecedence.erase(Op); }
 
         std::shared_ptr<ExprAST> parser_one() 
         {
@@ -137,10 +139,7 @@ namespace Parser
                     if (CurToken.tk_string[0] == '{')
                         ret = parser_block();
                     else
-                    {
-                        set_op(",", 1); // for domma expression
                         ret = parser_experssion();
-                    }
                     break;
                 }
             }
@@ -149,10 +148,10 @@ namespace Parser
             return ret;
         }
 
-        void parser_log_err(const std::string& loginfo)
+        void parser_err(const std::string& loginfo)
         {
             std::cerr << loginfo;
-            std::cerr << "\n[PARSER_LOG_ERROR] in line: " << LineNumber << ", ";
+            std::cerr << "\n[PARSER_ERROR] in line: " << LineNumber << ", ";
             std::cerr << "in token: ";
             print_token(CurToken);
             std::cerr << std::endl;

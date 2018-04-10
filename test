@@ -23,6 +23,13 @@ else
     q = 4;
 }
 
+function aa()
+{
+    return;
+    return;
+}
+aa();
+
 print (q+"\n");
 a=1,a=999,a=888;
 print (a);
@@ -73,7 +80,7 @@ print (1<<8);
 function b()
 {
     //a=777;
-    //return;
+    return;
     d=666;
     f=100;
     if (1)

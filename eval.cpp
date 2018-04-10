@@ -3,20 +3,34 @@ using namespace Eval;
 
 inline std::shared_ptr<ExprAST> EvalImpl::eval_block(std::vector<std::shared_ptr<ExprAST>>& Statement)
 {
+#ifdef elog
+    log("in eval_block");
+#endif
+    if (Statement.empty())
+        return std::make_shared<IntegerValueExprAST>(0);
+
     std::shared_ptr<ExprAST> ret;
     for (auto i : Statement)
     {
         EvalLineNumber = i->LineNumber;
         ret = eval_one(i);
-        switch (ret->SubType)
-        {
-            case Type::return_expr: case Type::break_expr: case Type::continue_expr:
-                return ret;
-            default:
-                break;
-        }
+        if (is_interrupt_control_flow(ret))
+            break;
     }
     return ret;
+}
+
+std::shared_ptr<ExprAST> EvalImpl::eval_return(std::shared_ptr<ReturnExprAST> R)
+{
+#ifdef elog
+    log("in eval_return");
+#endif
+    if (R->RetValue) // Check it is just return , or not.
+    {
+        auto ans = eval_one(R->RetValue);
+        return ans;
+    }
+    return R;
 }
 
 inline std::shared_ptr<ExprAST> EvalImpl::eval_function_expr(std::shared_ptr<FunctionAST> F)
@@ -28,6 +42,9 @@ inline std::shared_ptr<ExprAST> EvalImpl::eval_function_expr(std::shared_ptr<Fun
 
 std::shared_ptr<ExprAST> EvalImpl::eval_if_else(std::shared_ptr<IfExprAST> If)
 {
+#ifdef elog
+    log("in eval_if_else");
+#endif
     enter_new_env();
 
     auto Cond = eval_one(If->Cond);
@@ -46,7 +63,7 @@ std::shared_ptr<ExprAST> EvalImpl::eval_if_else(std::shared_ptr<IfExprAST> If)
                 break;
             default:
                 Cond->print_ast();
-                eval_err("[eval_if_else] Syntax Error.");
+                eval_err("[eval_if_else] Uncaught SyntaxError: Unexpected name " + Cond->get_ast_name() + ".");
         }
     }
 
@@ -54,7 +71,6 @@ std::shared_ptr<ExprAST> EvalImpl::eval_if_else(std::shared_ptr<IfExprAST> If)
     if (cond_bool)
     {
         auto R = eval_block(If->IfBlock->Statement);
-        can_break_control_flow(R);
         recover_prev_env();
         return R;
     }
@@ -62,26 +78,28 @@ std::shared_ptr<ExprAST> EvalImpl::eval_if_else(std::shared_ptr<IfExprAST> If)
     // Execute else-if
     if (If->ElseIf)
     {
-        auto R = eval_if_else(std::static_pointer_cast<IfExprAST>(If->ElseIf));
+        auto R = eval_if_else(ptr_to<IfExprAST>(If->ElseIf));
         recover_prev_env();
         return R;
     }
 
     // Execute else-statement
-    if (!If->ElseBlock->Statement.empty())
+    if (If->ElseBlock && !If->ElseBlock->Statement.empty())
     {
         auto R = eval_block(If->ElseBlock->Statement);
-        can_break_control_flow(R);
         recover_prev_env();
         return R;
     }
 
     recover_prev_env();
-    return nullptr;
+    return If;
 }
 
 std::shared_ptr<ExprAST> EvalImpl::eval_for(std::shared_ptr<ForExprAST> For)
 {
+#ifdef elog
+    log("in eval_for");
+#endif
     enter_new_env();
 
     auto InitCond = eval_expression(For->Cond[0]);
@@ -89,34 +107,99 @@ std::shared_ptr<ExprAST> EvalImpl::eval_for(std::shared_ptr<ForExprAST> For)
     {
         while (value_to_bool(eval_expression(For->Cond[1])))
         {
-            eval_block(For->Block->Statement);
+            if (For->Block)
+            {
+                auto R = eval_block(For->Block->Statement);
+                if (is_interrupt_control_flow(R))
+                {
+                    if (isBreak(R))
+                        break;
+                    else if (isContinue(R))
+                        continue;
+                    else if (isReturn(R))
+                    {
+                        recover_prev_env();
+                        return R;
+                    }
+                }
+            }
             eval_expression(For->Cond[2]);
         }
     }
 
     recover_prev_env();
-    return nullptr;
+    return For;
 }
 
 std::shared_ptr<ExprAST> EvalImpl::eval_while(std::shared_ptr<WhileExprAST> While)
 {
-    return nullptr;
+#ifdef elog
+    log("in eval_while");
+#endif
+    enter_new_env();
+    while (value_to_bool(eval_expression(While->Cond)))
+    {
+        if (While->Block)
+        {
+            auto R = eval_block(While->Block->Statement);
+            if (is_interrupt_control_flow(R))
+            {
+                if (isBreak(R))
+                    break;
+                else if (isContinue(R))
+                    continue;
+                else if (isReturn(R))
+                {
+                    recover_prev_env();
+                    return R;
+                }
+            }
+        }
+    }
+    recover_prev_env();
+    return While;
 }
 
 std::shared_ptr<ExprAST> EvalImpl::eval_do_while(std::shared_ptr<DoWhileExprAST> DoWhile)
 {
-    return nullptr;
+#ifdef elog
+    log("in eval_do_while");
+#endif
+    enter_new_env();
+    do {
+        if (DoWhile->Block)
+        {
+            auto R = eval_block(DoWhile->Block->Statement);
+            if (is_interrupt_control_flow(R))
+            {
+                if (isBreak(R))
+                    break;
+                else if (isContinue(R))
+                    continue;
+                else if (isReturn(R))
+                {
+                    recover_prev_env();
+                    return R;
+                }
+            }
+        }
+    } while (value_to_bool(eval_expression(DoWhile->Cond)));
+
+    recover_prev_env();
+    return DoWhile;
 }
 
 std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> Caller)
 {
+#ifdef elog
+    log("in eval_call_expr");
+#endif
     // If is built in function
     if (is_built_in(Caller->Callee))
         return exec_built_in(Caller);
 
-    // Switch to sub scope
-    CurScope = find_name_belong_scope(Caller->Callee);
-    auto F = CurScope->get(Caller->Callee);
+    // Find function prototype
+    auto F = find_name(Caller->Callee);
     if (!F)
     {
         ERR_INFO = "[eval_call_expr] ReferenceError: '" + Caller->Callee + "' is not defined. ";
@@ -124,21 +207,29 @@ std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> C
     }
 
     // Get the function definition
-    auto Func = std::static_pointer_cast<FunctionAST>(F);
+    auto Func = ptr_to<FunctionAST>(F);
 
-    // Creat new function environment
+    // Creat new function environment, Switch to sub scope
     enter_new_env();
 
     // Set parameters
     if (Caller->Args.size() >= Func->Proto->Args.size())
     {
         for (int i = 0; i < Func->Proto->Args.size(); ++i)
-            CurScope->set(get_name(Func->Proto->Args[i]), eval_expression(Caller->Args[i]));        
+        {
+            auto tmp_V = eval_expression(Caller->Args[i]);
+            if (isVariable(tmp_V)) tmp_V = get_variable_value(tmp_V);
+            CurScope->set(get_name(Func->Proto->Args[i]), tmp_V);
+        }
     }
     else
     {
         for (int i = 0; i < Caller->Args.size(); i++)
-            CurScope->set(get_name(Func->Proto->Args[i]), eval_expression(Caller->Args[i])); 
+        {
+            auto tmp_V = eval_expression(Caller->Args[i]);
+            if (isVariable(tmp_V)) tmp_V = get_variable_value(tmp_V);
+            CurScope->set(get_name(Func->Proto->Args[i]), tmp_V);
+        }
 
         for (int i = Caller->Args.size(); i < Func->Proto->Args.size(); i++)
             eval_expression(Func->Proto->Args[i]);
@@ -150,15 +241,11 @@ std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> C
     {
         case Type::return_expr:
         {
-            auto res = std::static_pointer_cast<ReturnExprAST>(ret);
-            if (res->RetValue) // Check it is just return , or not.
-            {
-                auto ans = eval_one(res->RetValue);
-                recover_prev_env(); // Exit curr environment
-                return ans;
-            }
+            auto R = eval_return(ptr_to<ReturnExprAST>(ret));
+            if (isVariable(R) || isFunction(R))
+                R = find_name(get_name(R));
             recover_prev_env(); // Exit curr environment
-            return nullptr;
+            return R;
         }
         case Type::break_expr:
             eval_err("Uncaught SyntaxError: Illegal break statement");
@@ -169,21 +256,23 @@ std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> C
     }
 
     recover_prev_env(); // Exit curr environment
-    return nullptr;
+    return ret;
 }
 
 std::shared_ptr<ExprAST> EvalImpl::eval_unary_op_expr(std::shared_ptr<UnaryOpExprAST> expr)
 {
+#ifdef elog
+    log("in eval_unary_op_expr");
+#endif
     auto Op = expr->Op;
     auto E = eval_one(expr->Expression);
-    std::shared_ptr<ExprAST> _v = E;
-    if (E->SubType == Type::variable_expr)
+    auto _v = E;
+    if (isVariable(E))
     {
-        auto _e = std::static_pointer_cast<VariableExprAST>(E);
-        _v = get_variable_value(_e);
+        _v = get_variable_value(E);
         if (!_v)
         {
-            ERR_INFO = "[eval_unary_op_expr] ReferenceError '" + _e->Name + "' is not defined.";
+            ERR_INFO = "[eval_unary_op_expr] ReferenceError '" + get_name(E) + "' is not defined.";
             eval_err(ERR_INFO);
         }
     }
@@ -192,11 +281,16 @@ std::shared_ptr<ExprAST> EvalImpl::eval_unary_op_expr(std::shared_ptr<UnaryOpExp
     if (Op == "+") return _mul(_v, std::make_shared<IntegerValueExprAST>(1));
     if (Op == "~") return _bit_not(_v);
     if (Op == "!") return _not(_v);
+
+    eval_err("Uncaught SyntaxError: Unexpected token "+ Op);
     return nullptr;
 }
 
 std::shared_ptr<ExprAST> EvalImpl::eval_binary_op_expr(std::shared_ptr<BinaryOpExprAST> expr)
 {
+#ifdef elog
+    log("in eval_binary_op_expr");
+#endif
     auto LHS = eval_expression(expr->LHS);
     auto RHS = eval_expression(expr->RHS);
 
@@ -210,69 +304,85 @@ std::shared_ptr<ExprAST> EvalImpl::eval_binary_op_expr(std::shared_ptr<BinaryOpE
 // Calculation of evaluation
 std::shared_ptr<ExprAST> EvalImpl::eval_bin_op_expr_helper(const std::string& Op, std::shared_ptr<ExprAST> LHS, std::shared_ptr<ExprAST> RHS)
 {
+#ifdef elog
+    log("in eval_bin_op_expr_helper");
+#endif
+    /* RHS is a variable */
+    auto rvalue = RHS;
+    if (isVariable(RHS))
+    {
+        rvalue = get_variable_value(RHS);
+        if (!rvalue)
+        {
+            ERR_INFO = "[eval_bin_op_expr_helper] ReferenceError: '" + get_name(RHS) + "' is not defined. ";
+            eval_err(ERR_INFO);
+        }
+    }
+
+    // Assign
     if (Op == "=")
     {
-        if (LHS->SubType != Type::variable_expr)
+    #ifdef elog
+        log("in _assign");
+    #endif
+        if (!isVariable(LHS))
             eval_err("[eval_bin_op_expr_helper] Expected a variable_expr before '=', rvalue is not a identifier. ");
 
         // Invoke assign(...) if need check type
         // assign(LHS, RHS);
-        auto _var = std::static_pointer_cast<VariableExprAST>(LHS);
+        auto _var = ptr_to<VariableExprAST>(LHS);
         if (_var->DefineType == "var")
-            get_top_scope()->set(_var->Name, RHS);
+            get_top_scope()->set(_var->Name, rvalue);
         else if (_var->DefineType == "let")
-            CurScope->set(_var->Name, RHS);
+            CurScope->set(_var->Name, rvalue);
         else /* auto set variable, local first. */
-            set_name(_var->Name, RHS);
-        return RHS;
-    }
-    /* It's a variable */
-    if (LHS->SubType == Type::variable_expr)
-    {
-        auto _l = std::static_pointer_cast<VariableExprAST>(LHS);
-        LHS = find_name(_l->Name);
-        
-        if (!LHS)
-        {
-            ERR_INFO = "[eval_bin_op_expr_helper] ReferenceError: '" + _l->Name + "' is not defined. ";
-            eval_err(ERR_INFO);
-        }
-    }
-    
-    if (RHS->SubType == Type::variable_expr)
-    {
-        auto _r = std::static_pointer_cast<VariableExprAST>(RHS);
-        RHS = find_name(_r->Name);
-        if (!RHS)
-        {
-            ERR_INFO = "[eval_bin_op_expr_helper] ReferenceError: '" + _r->Name + "' is not defined. ";
-            eval_err(ERR_INFO);
-        }
+            set_name(_var->Name, rvalue);
+
+        // print_value(rvalue); // debug
+        return rvalue;
     }
 
-    // LHS, RHS is Integer or Float or String or Expression
-    if (Op == ",")
+    // LHS is a variable
+    auto lvalue = LHS;
+    if (isVariable(LHS))
     {
-        eval_expression(LHS);
-        return eval_expression(RHS);
+        lvalue = get_variable_value(LHS);
+        if (!lvalue)
+        {
+            ERR_INFO = "[eval_bin_op_expr_helper] ReferenceError: '" + get_name(LHS) + "' is not defined. ";
+            eval_err(ERR_INFO);
+        }
     }
-    if (Op == "+")  return _add(LHS, RHS);
-    if (Op == "-")  return _sub(LHS, RHS);
-    if (Op == "*")  return _mul(LHS, RHS);
-    if (Op == "/")  return _div(LHS, RHS);
-    if (Op == ">")  return _greater(LHS, RHS);
-    if (Op == "<")  return _less(LHS, RHS);
-    if (Op == ">=") return _not_more(LHS, RHS);
-    if (Op == "<=") return _not_less(LHS, RHS);
-    if (Op == "==") return _equal(LHS, RHS);
-    if (Op == "%")  return _mod(LHS, RHS);
-    if (Op == "&&") return _and(LHS, RHS);
-    if (Op == "||") return _or(LHS, RHS);
-    if (Op == ">>") return _bit_rshift(LHS, RHS);
-    if (Op == "<<") return _bit_lshift(LHS, RHS);
-    if (Op == "&")  return _bit_and(LHS, RHS);
-    if (Op == "|")  return _bit_or(LHS, RHS);
-    if (Op == "^")  return _bit_xor(LHS, RHS);
+    // LHS, RHS is Integer or Float or String or Expression
+    if (Op.length() == 1)
+    {
+        switch (Op[0])
+        {
+            case ',':
+                eval_expression(lvalue);
+                return eval_expression(rvalue);
+            case '+':  return _add(lvalue, rvalue);
+            case '-':  return _sub(lvalue, rvalue);
+            case '*':  return _mul(lvalue, rvalue);
+            case '/':  return _div(lvalue, rvalue);
+            case '>':  return _greater(lvalue, rvalue);
+            case '<':  return _less(lvalue, rvalue);
+            case '%':  return _mod(lvalue, rvalue);
+            case '&':  return _bit_and(lvalue, rvalue);
+            case '|':  return _bit_or(lvalue, rvalue);
+            case '^':  return _bit_xor(lvalue, rvalue);
+            default: break;
+        }
+    }
+    else if (Op == ">=") return _not_less(lvalue, rvalue);
+    else if (Op == "<=") return _not_more(lvalue, rvalue);
+    else if (Op == "==") return _equal(lvalue, rvalue);
+    else if (Op == "&&") return _and(lvalue, rvalue);
+    else if (Op == "||") return _or(lvalue, rvalue);
+    else if (Op == ">>") return _bit_rshift(lvalue, rvalue);
+    else if (Op == "<<") return _bit_lshift(lvalue, rvalue);
+
+
     
     ERR_INFO = "[eval_bin_op_expr_helper] '" + Op + "' is invalid operator.";
     eval_err(ERR_INFO);
@@ -282,35 +392,38 @@ std::shared_ptr<ExprAST> EvalImpl::eval_bin_op_expr_helper(const std::string& Op
 
 std::shared_ptr<ExprAST> EvalImpl::_add(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
+#ifdef elog
+    log("in _add");
+#endif
     /* Number */
     // 1+1=2
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val + std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) + get_value<IntegerValueExprAST>(RHS));
     // 1+1.0=2.0
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val + std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<IntegerValueExprAST>(LHS) + get_value<FloatValueExprAST>(RHS));
     // 1.0+1=2.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr) 
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val + std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isInt(RHS)) 
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) + get_value<IntegerValueExprAST>(RHS));
     // 1.0+1.0=2.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val + std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) + get_value<FloatValueExprAST>(RHS));
     /* String */
     // "1"+"1"="11"
-    if (LHS->SubType == Type::string_expr && RHS->SubType == Type::string_expr)
-        return std::make_shared<StringValueExprAST>(std::static_pointer_cast<StringValueExprAST>(LHS)->Val + std::static_pointer_cast<StringValueExprAST>(RHS)->Val);
+    if (isString(LHS) && isString(RHS))
+        return std::make_shared<StringValueExprAST>(get_value<StringValueExprAST>(LHS) + get_value<StringValueExprAST>(RHS));
     // 1+"1"="11"
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::string_expr)
-        return std::make_shared<StringValueExprAST>(std::to_string(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val) + std::static_pointer_cast<StringValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isString(RHS))
+        return std::make_shared<StringValueExprAST>(std::to_string(get_value<IntegerValueExprAST>(LHS)) + get_value<StringValueExprAST>(RHS));
     // "1"+1="11"
-    if (LHS->SubType == Type::string_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<StringValueExprAST>(std::static_pointer_cast<StringValueExprAST>(LHS)->Val + std::to_string(std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val));
+    if (isString(LHS) && isInt(RHS))
+        return std::make_shared<StringValueExprAST>(get_value<StringValueExprAST>(LHS) + std::to_string(get_value<IntegerValueExprAST>(RHS)));
     // 1.0+"1"="1.01"
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::string_expr)
-        return std::make_shared<StringValueExprAST>(std::to_string(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val) + std::static_pointer_cast<StringValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isString(RHS))
+        return std::make_shared<StringValueExprAST>(std::to_string(get_value<FloatValueExprAST>(LHS)) + get_value<StringValueExprAST>(RHS));
     // "1"+1.1="11.1"
-    if (LHS->SubType == Type::string_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<StringValueExprAST>(std::static_pointer_cast<StringValueExprAST>(LHS)->Val + std::to_string(std::static_pointer_cast<FloatValueExprAST>(RHS)->Val));
+    if (isString(LHS) && isFloat(RHS))
+        return std::make_shared<StringValueExprAST>(get_value<StringValueExprAST>(LHS) + std::to_string(get_value<FloatValueExprAST>(RHS)));
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_add] Invalid '+' expression.");
@@ -320,17 +433,17 @@ std::shared_ptr<ExprAST> EvalImpl::_add(const std::shared_ptr<ExprAST> LHS, cons
 std::shared_ptr<ExprAST> EvalImpl::_sub(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
     // 1-1=0
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val - std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) - get_value<IntegerValueExprAST>(RHS));
     // 1-1.0=0.0
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val - std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<IntegerValueExprAST>(LHS) - get_value<FloatValueExprAST>(RHS));
     // 1.0-1=0.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr) 
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val - std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isInt(RHS)) 
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) - get_value<IntegerValueExprAST>(RHS));
     // 1.0-1.0=0.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val - std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) - get_value<FloatValueExprAST>(RHS));
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_sub] Invalid '-' expression.");
@@ -340,17 +453,17 @@ std::shared_ptr<ExprAST> EvalImpl::_sub(const std::shared_ptr<ExprAST> LHS, cons
 std::shared_ptr<ExprAST> EvalImpl::_mul(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
     // 1*1=1
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val * std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) * get_value<IntegerValueExprAST>(RHS));
     // 1*1.0=1.0
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val * std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<IntegerValueExprAST>(LHS) * get_value<FloatValueExprAST>(RHS));
     // 1.0*1=1.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr) 
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val * std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isInt(RHS)) 
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) * get_value<IntegerValueExprAST>(RHS));
     // 1.0*1.0=1.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val * std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) * get_value<FloatValueExprAST>(RHS));
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_mul] Invalid '*' expression.");
@@ -360,17 +473,17 @@ std::shared_ptr<ExprAST> EvalImpl::_mul(const std::shared_ptr<ExprAST> LHS, cons
 std::shared_ptr<ExprAST> EvalImpl::_div(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
     // 1/1=1
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val / std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) / get_value<IntegerValueExprAST>(RHS));
     // 1/1.0=1.0
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val / std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<IntegerValueExprAST>(LHS) / get_value<FloatValueExprAST>(RHS));
     // 1.0/1=1.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr) 
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val / std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isInt(RHS)) 
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) / get_value<IntegerValueExprAST>(RHS));
     // 1.0/1.0=1.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val / std::static_pointer_cast<FloatValueExprAST>(RHS)->Val);
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(get_value<FloatValueExprAST>(LHS) / get_value<FloatValueExprAST>(RHS));
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_div] Invalid '/' expression.");
@@ -380,17 +493,17 @@ std::shared_ptr<ExprAST> EvalImpl::_div(const std::shared_ptr<ExprAST> LHS, cons
 std::shared_ptr<ExprAST> EvalImpl::_mod(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
     // 1%1=0
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val % std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val);
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) % get_value<IntegerValueExprAST>(RHS));
     // 1%1.0=0.0
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(fmod(std::static_pointer_cast<IntegerValueExprAST>(LHS)->Val, std::static_pointer_cast<FloatValueExprAST>(RHS)->Val));
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(fmod(get_value<IntegerValueExprAST>(LHS), get_value<FloatValueExprAST>(RHS)));
     // 1.0%1=0.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr) 
-        return std::make_shared<FloatValueExprAST>(fmod(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val, std::static_pointer_cast<IntegerValueExprAST>(RHS)->Val));
+    if (isFloat(LHS) && isInt(RHS)) 
+        return std::make_shared<FloatValueExprAST>(fmod(get_value<FloatValueExprAST>(LHS), get_value<IntegerValueExprAST>(RHS)));
     // 1.0%1.0=0.0
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<FloatValueExprAST>(fmod(std::static_pointer_cast<FloatValueExprAST>(LHS)->Val, std::static_pointer_cast<FloatValueExprAST>(RHS)->Val));
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<FloatValueExprAST>(fmod(get_value<FloatValueExprAST>(LHS), get_value<FloatValueExprAST>(RHS)));
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_mod] Invalid \'%\' expression.");
@@ -406,17 +519,17 @@ inline std::shared_ptr<ExprAST> EvalImpl::_not(const std::shared_ptr<ExprAST> RH
 /* >  <  >=  <=  == */
 std::shared_ptr<ExprAST> EvalImpl::_greater(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) > get_value<IntegerValueExprAST>(RHS));
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) > get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) > get_value<IntegerValueExprAST>(RHS));
+    if (isFloat(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) > get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) > get_value<FloatValueExprAST>(RHS));
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) > get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) > get_value<FloatValueExprAST>(RHS));
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) > get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_greater] Invalid '>' expression.");
@@ -425,17 +538,20 @@ std::shared_ptr<ExprAST> EvalImpl::_greater(const std::shared_ptr<ExprAST> LHS, 
 
 std::shared_ptr<ExprAST> EvalImpl::_less(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) < get_value<IntegerValueExprAST>(RHS));
+#ifdef elog
+    log("in _less");
+#endif
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) < get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) < get_value<IntegerValueExprAST>(RHS));
+    if (isFloat(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) < get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) < get_value<FloatValueExprAST>(RHS));
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) < get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) < get_value<FloatValueExprAST>(RHS));
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) < get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_less] Invalid '<' expression.");
@@ -444,17 +560,17 @@ std::shared_ptr<ExprAST> EvalImpl::_less(const std::shared_ptr<ExprAST> LHS, con
 
 std::shared_ptr<ExprAST> EvalImpl::_not_more(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) <= get_value<IntegerValueExprAST>(RHS));
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) <= get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) <= get_value<IntegerValueExprAST>(RHS));
+    if (isFloat(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) <= get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) <= get_value<FloatValueExprAST>(RHS));
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) <= get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) <= get_value<FloatValueExprAST>(RHS));
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) <= get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_not_more] Invalid '<=' expression.");
@@ -463,17 +579,17 @@ std::shared_ptr<ExprAST> EvalImpl::_not_more(const std::shared_ptr<ExprAST> LHS,
 
 std::shared_ptr<ExprAST> EvalImpl::_not_less(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) >= get_value<IntegerValueExprAST>(RHS));
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) >= get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) >= get_value<IntegerValueExprAST>(RHS));
+    if (isFloat(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) >= get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) >= get_value<FloatValueExprAST>(RHS));
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) >= get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) >= get_value<FloatValueExprAST>(RHS));
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) >= get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_not_less] Invalid '>=' expression.");
@@ -482,20 +598,20 @@ std::shared_ptr<ExprAST> EvalImpl::_not_less(const std::shared_ptr<ExprAST> LHS,
 
 std::shared_ptr<ExprAST> EvalImpl::_equal(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) == get_value<IntegerValueExprAST>(RHS));
+    if (isInt(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) == get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) == get_value<IntegerValueExprAST>(RHS));
+    if (isFloat(LHS) && isInt(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) == get_value<IntegerValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) == get_value<FloatValueExprAST>(RHS));
+    if (isInt(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) == get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) == get_value<FloatValueExprAST>(RHS));
+    if (isFloat(LHS) && isFloat(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<FloatValueExprAST>(LHS) == get_value<FloatValueExprAST>(RHS) ? 1 : 0);
 
-    if (LHS->SubType == Type::string_expr && RHS->SubType == Type::string_expr)
-        return std::make_shared<IntegerValueExprAST>(get_value<StringValueExprAST>(LHS) == get_value<StringValueExprAST>(RHS)); 
+    if (isString(LHS) && isString(RHS))
+        return std::make_shared<IntegerValueExprAST>(get_value<StringValueExprAST>(LHS) == get_value<StringValueExprAST>(RHS) ? 1 : 0); 
 
     LHS->print_ast(); RHS->print_ast();
     eval_err("[_equal] Invalid '==' expression.");
@@ -521,16 +637,16 @@ inline std::shared_ptr<ExprAST> EvalImpl::_or(const std::shared_ptr<ExprAST> LHS
 
 std::shared_ptr<ExprAST> EvalImpl::_bit_rshift(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
+    if (isInt(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) >> get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
+    if (isFloat(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)(get_value<FloatValueExprAST>(LHS)) >> get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
+    if (isInt(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) >> (IntType)(get_value<FloatValueExprAST>(RHS)));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
+    if (isFloat(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)get_value<FloatValueExprAST>(LHS) >> (IntType)(get_value<FloatValueExprAST>(RHS)));
 
     LHS->print_ast(); RHS->print_ast();
@@ -540,16 +656,16 @@ std::shared_ptr<ExprAST> EvalImpl::_bit_rshift(const std::shared_ptr<ExprAST> LH
 
 std::shared_ptr<ExprAST> EvalImpl::_bit_lshift(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
+    if (isInt(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) << get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
+    if (isFloat(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)(get_value<FloatValueExprAST>(LHS)) << get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
+    if (isInt(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) << (IntType)(get_value<FloatValueExprAST>(RHS)));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
+    if (isFloat(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)get_value<FloatValueExprAST>(LHS) << (IntType)(get_value<FloatValueExprAST>(RHS)));
 
     LHS->print_ast(); RHS->print_ast();
@@ -559,16 +675,16 @@ std::shared_ptr<ExprAST> EvalImpl::_bit_lshift(const std::shared_ptr<ExprAST> LH
 
 std::shared_ptr<ExprAST> EvalImpl::_bit_and(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
+    if (isInt(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) & get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
+    if (isFloat(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)(get_value<FloatValueExprAST>(LHS)) & get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
+    if (isInt(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) & (IntType)(get_value<FloatValueExprAST>(RHS)));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
+    if (isFloat(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)get_value<FloatValueExprAST>(LHS) & (IntType)(get_value<FloatValueExprAST>(RHS)));
 
     LHS->print_ast(); RHS->print_ast();
@@ -578,16 +694,16 @@ std::shared_ptr<ExprAST> EvalImpl::_bit_and(const std::shared_ptr<ExprAST> LHS, 
 
 std::shared_ptr<ExprAST> EvalImpl::_bit_or(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
+    if (isInt(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) | get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
+    if (isFloat(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)(get_value<FloatValueExprAST>(LHS)) | get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
+    if (isInt(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) | (IntType)(get_value<FloatValueExprAST>(RHS)));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
+    if (isFloat(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)get_value<FloatValueExprAST>(LHS) | (IntType)(get_value<FloatValueExprAST>(RHS)));
 
     LHS->print_ast(); RHS->print_ast();
@@ -597,16 +713,16 @@ std::shared_ptr<ExprAST> EvalImpl::_bit_or(const std::shared_ptr<ExprAST> LHS, c
 
 std::shared_ptr<ExprAST> EvalImpl::_bit_xor(const std::shared_ptr<ExprAST> LHS, const std::shared_ptr<ExprAST> RHS)
 {
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::integer_expr)
+    if (isInt(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) ^ get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::integer_expr)
+    if (isFloat(LHS) && isInt(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)(get_value<FloatValueExprAST>(LHS)) ^ get_value<IntegerValueExprAST>(RHS));
 
-    if (LHS->SubType == Type::integer_expr && RHS->SubType == Type::float_expr)
+    if (isInt(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>(get_value<IntegerValueExprAST>(LHS) ^ (IntType)(get_value<FloatValueExprAST>(RHS)));
 
-    if (LHS->SubType == Type::float_expr && RHS->SubType == Type::float_expr)
+    if (isFloat(LHS) && isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>((IntType)get_value<FloatValueExprAST>(LHS) ^ (IntType)(get_value<FloatValueExprAST>(RHS)));
 
     LHS->print_ast(); RHS->print_ast();
@@ -617,10 +733,10 @@ std::shared_ptr<ExprAST> EvalImpl::_bit_xor(const std::shared_ptr<ExprAST> LHS, 
 /* '~' */
 std::shared_ptr<ExprAST> EvalImpl::_bit_not(const std::shared_ptr<ExprAST> RHS)
 {
-    if (RHS->SubType == Type::integer_expr)
+    if (isInt(RHS))
         return std::make_shared<IntegerValueExprAST>(~get_value<IntegerValueExprAST>(RHS));
 
-    if (RHS->SubType == Type::float_expr)
+    if (isFloat(RHS))
         return std::make_shared<IntegerValueExprAST>(~((IntType)get_value<FloatValueExprAST>(RHS)));
 
     RHS->print_ast();
