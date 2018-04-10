@@ -3,10 +3,10 @@
 
 #include <cmath>
 #include <string>
-#include <unordered_map>
-#include "ast.h"
 #include "env.h"
+#include "ast.h"
 #include "log.h"
+#include "built_in.h"
 
 // #define elog
 
@@ -14,15 +14,15 @@ namespace Eval
 {
     using namespace AST;
     using namespace Env;
+    using namespace BuiltIn;
 
-    class EvalImpl
+    class EvalImpl : public BuiltInImpl
     {
     using IntType = long long;
     using T = std::vector<std::shared_ptr<ExprAST>>;
     using EnvImpl = EnvImpl<T::value_type>;
     
     private:
-        std::unordered_map<std::string, int> BuiltIn;
         std::shared_ptr<EnvImpl> Scope;
         std::shared_ptr<EnvImpl> CurScope;
         const std::string TopScope = "__top_expression";
@@ -34,9 +34,9 @@ namespace Eval
         EvalImpl() = delete;
         EvalImpl(T Expression) : Expression(std::move(Expression)) 
         {
+            BuiltInImpl();
             if (!Scope)
             {
-                init_built_in();
                 CurScope.reset(new EnvImpl(TopScope));
                 Scope = CurScope;
                 EvalLineNumber = 1;
@@ -50,33 +50,23 @@ namespace Eval
         EvalImpl(EvalImpl&&) = delete;
         const EvalImpl& operator =(EvalImpl&&) = delete;
 
-        /* <-- Built-In --> */
-        void init_built_in()
-        {
-            BuiltIn["print"] = 1;
-        }
-
-        bool is_built_in(const std::string& Name)
-        {
-            return BuiltIn.find(Name) != BuiltIn.end() ? true : false;
-        }
-
+        /* Attention !!! Wait for rewrite !!! */
         std::shared_ptr<ExprAST> exec_built_in(std::shared_ptr<ExprAST> Func)
         {
             auto F = ptr_to<CallExprAST>(Func);
             auto Name = F->Callee;
             if (Name == "print")
             {
-                if (F->Args.size() == 1)
+                for (int i = 0; i < F->Args.size(); i++)
                 {
-                    auto arg = F->Args[0];
+                    auto arg = F->Args[i];
                     print_value(eval_expression(arg));
                 }
             }
             return F;
         }
-        /* <-- Built-In --> */
 
+        /* -- Scope -- */
         std::shared_ptr<EnvImpl> get_top_scope()
         {
             auto _CurScope = CurScope;
@@ -87,7 +77,6 @@ namespace Eval
 
         void enter_new_env()
         { CurScope.reset(new EnvImpl(CurScope)); }
-
         void enter_new_env(const std::string& Name)
         { CurScope.reset(new EnvImpl(Name, CurScope)); }
 
@@ -113,6 +102,7 @@ namespace Eval
 
         bool is_top_scope()
         { return CurScope->Parent ? false : true; }
+        /* ++ Scope ++ */
 
         bool is_interrupt_control_flow(std::shared_ptr<ExprAST> E)
         {
@@ -127,18 +117,15 @@ namespace Eval
             }
         }
 
+        /* -- Name -- */
         // Find exist name
         // if (!find_name()) => Check name is exist?
         std::shared_ptr<ExprAST> find_name(const std::string& Name)
-        {
-            return find_name_belong_scope(Name)->get(Name);
-        }
+        { return find_name_belong_scope(Name)->get(Name); }
 
         // Set a variable or function
         void set_name(const std::string& Name, std::shared_ptr<ExprAST> Value)
-        {
-            find_name_belong_scope(Name)->set(Name, Value);
-        }
+        { find_name_belong_scope(Name)->set(Name, Value); }
 
         // get name
         std::string get_name(std::shared_ptr<ExprAST> V)
@@ -157,6 +144,7 @@ namespace Eval
                     return "";
             }
         }
+        /* ++ Name ++ */
 
         // Type conversion: integer float string => bool
         bool value_to_bool(std::shared_ptr<ExprAST> V)
@@ -198,24 +186,9 @@ namespace Eval
         // Point transform
         template <typename T>
         inline std::shared_ptr<T> ptr_to(std::shared_ptr<ExprAST> P)
-        {
-            return std::static_pointer_cast<T>(P);
-        }
+        { return std::static_pointer_cast<T>(P); }
 
-        // get Integer or Float or String
-        template <typename T>
-        typename T::value_type get_value(std::shared_ptr<ExprAST> V)
-        {
-            return ptr_to<T>(V)->Val;
-        }
-
-        std::shared_ptr<ExprAST> get_variable_value(std::shared_ptr<ExprAST> V)
-        {
-            auto v = find_name(ptr_to<VariableExprAST>(V)->Name);
-            if (!v) return nullptr;
-            return v;
-        }
-
+        /* -- Value -- */
         void print_value(std::shared_ptr<ExprAST> V)
         {
             switch (V->SubType)
@@ -249,6 +222,21 @@ namespace Eval
                     break;
             }
         }
+
+        // get Integer or Float or String
+        template <typename T>
+        typename T::value_type get_value(std::shared_ptr<ExprAST> V)
+        {
+            return ptr_to<T>(V)->Val;
+        }
+
+        std::shared_ptr<ExprAST> get_variable_value(std::shared_ptr<ExprAST> V)
+        {
+            auto v = find_name(ptr_to<VariableExprAST>(V)->Name);
+            if (!v) return nullptr;
+            return v;
+        }
+        /* ++ Value ++ */
 
         std::shared_ptr<ExprAST> eval_function_expr(std::shared_ptr<FunctionAST> F);
         std::shared_ptr<ExprAST> eval_return(std::shared_ptr<ReturnExprAST> R);

@@ -25,7 +25,7 @@ std::shared_ptr<ExprAST> EvalImpl::eval_return(std::shared_ptr<ReturnExprAST> R)
 #ifdef elog
     log("in eval_return");
 #endif
-    if (R->RetValue) // Check it is just return , or not.
+    if (R->RetValue) // Check just return , or not.
     {
         auto ans = eval_one(R->RetValue);
         return ans;
@@ -194,7 +194,7 @@ std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> C
 #ifdef elog
     log("in eval_call_expr");
 #endif
-    // If is built in function
+    // If built in function
     if (is_built_in(Caller->Callee))
         return exec_built_in(Caller);
 
@@ -206,10 +206,10 @@ std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> C
         eval_err(ERR_INFO);
     }
 
-    // Get the function definition
+    // Get function definition
     auto Func = ptr_to<FunctionAST>(F);
 
-    // Creat new function environment, Switch to sub scope
+    // Creat new function environment, Switch sub scope
     enter_new_env();
 
     // Set parameters
@@ -217,6 +217,7 @@ std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> C
     {
         for (int i = 0; i < Func->Proto->Args.size(); ++i)
         {
+            // If variable, get value
             auto tmp_V = eval_expression(Caller->Args[i]);
             if (isVariable(tmp_V)) tmp_V = get_variable_value(tmp_V);
             CurScope->set(get_name(Func->Proto->Args[i]), tmp_V);
@@ -226,6 +227,7 @@ std::shared_ptr<ExprAST> EvalImpl::eval_call_expr(std::shared_ptr<CallExprAST> C
     {
         for (int i = 0; i < Caller->Args.size(); i++)
         {
+            // If variable, get value
             auto tmp_V = eval_expression(Caller->Args[i]);
             if (isVariable(tmp_V)) tmp_V = get_variable_value(tmp_V);
             CurScope->set(get_name(Func->Proto->Args[i]), tmp_V);

@@ -291,10 +291,10 @@ inline std::shared_ptr<ExprAST> ParserImpl::parser_continue()
 // ifexpr
 //   ::= 'if' '(' expression ')' ';'
 //   ::= 'if' '(' expression ')' expression ';'
-//   ::= 'if' '(' expression ')' '{' statement '}'
-//   ::= 'if' '(' expression ')' '{' statement '}' 'else' expression ';'
-//   ::= 'if' '(' expression ')' '{' statement '}' 'else' statement
-//   ::= 'if' '(' expression ')' '{' statement '}' 'else' ifexpr
+//   ::= 'if' '(' expression ')' blockexpr
+//   ::= 'if' '(' expression ')' blockexpr 'else' expression ';'
+//   ::= 'if' '(' expression ')' blockexpr 'else' statement
+//   ::= 'if' '(' expression ')' blockexpr 'else' ifexpr
 std::shared_ptr<ExprAST> ParserImpl::parser_if()
 {
 #ifdef LOG
@@ -332,6 +332,8 @@ std::shared_ptr<ExprAST> ParserImpl::parser_if()
     return std::make_shared<IfExprAST>(Cond, IfBlock, ElseBlock);
 }
 
+// whileexpr
+//   ::= 'while' '(' expression ')' blockexpr
 std::shared_ptr<ExprAST> ParserImpl::parser_while()
 {
 #ifdef LOG
@@ -348,6 +350,8 @@ std::shared_ptr<ExprAST> ParserImpl::parser_while()
     return std::make_shared<WhileExprAST>(Cond, Block);
 }
 
+// dowhileexpr
+//   ::= 'do' blockexpr 'while' '(' expression ')' ';'
 std::shared_ptr<ExprAST> ParserImpl::parser_do_while()
 {
 #ifdef LOG
